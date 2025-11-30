@@ -5,11 +5,12 @@ import ConfigPanel from './components/ConfigPanel';
 import LoginPage from './components/LoginPage';
 import DeviceManager from './components/DeviceManager';
 import SystemSettings from './components/SystemSettings';
+import PatientQuery from './components/PatientQuery';
 import { DEFAULT_CONFIG, DEFAULT_GLOBAL_SETTINGS, DEFAULT_DEVICES } from './constants';
 import { QueueConfig, GlobalSystemSettings, DeviceBinding, Preset, Patient } from './types';
-import { MonitorPlay, Layout, Settings, LogOut, Monitor, Menu, Mic, RotateCcw, ArrowRight } from 'lucide-react';
+import { MonitorPlay, Layout, Settings, LogOut, Monitor, Menu, Mic, RotateCcw, ArrowRight, Search } from 'lucide-react';
 
-type View = 'dashboard' | 'devices' | 'settings' | 'designer';
+type View = 'dashboard' | 'devices' | 'settings' | 'designer' | 'query';
 
 const App: React.FC = () => {
   // --- Auth State ---
@@ -80,11 +81,12 @@ const App: React.FC = () => {
      const newWaiting = config.waitingList.slice(1);
      
      // Update current patient with new timestamp to trigger call
-     // IMPORTANT: For 'Local Broadcast' simulation, we assign the patient to the current window name
+     // IMPORTANT: For 'Local Broadcast' simulation, we assign the patient to the current window name/number
      const updatedNext = { 
        ...next, 
        callTimestamp: Date.now(),
-       windowName: config.windowName 
+       windowName: config.windowName,
+       windowNumber: config.windowNumber
      };
 
      setConfig({
@@ -123,7 +125,8 @@ const App: React.FC = () => {
       currentPatient: { 
         ...config.currentPatient, 
         callTimestamp: Date.now(),
-        windowName: config.windowName 
+        windowName: config.windowName,
+        windowNumber: config.windowNumber
       }
     });
     
@@ -161,6 +164,13 @@ const App: React.FC = () => {
             >
                <Layout size={20} />
                界面预案设计
+            </button>
+            <button 
+              onClick={() => setCurrentView('query')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${currentView === 'query' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+            >
+               <Search size={20} />
+               数据查询
             </button>
             <button 
               onClick={() => setCurrentView('settings')}
@@ -205,6 +215,13 @@ const App: React.FC = () => {
           </div>
         )}
 
+         {/* Patient Query View */}
+         {currentView === 'query' && (
+          <div className="flex-1 overflow-y-auto bg-gray-100">
+            <PatientQuery config={config} onUpdateConfig={setConfig} />
+          </div>
+        )}
+
         {/* Designer View (Original Split Screen) */}
         {currentView === 'designer' && (
           <div className="flex-1 flex h-full">
@@ -222,15 +239,26 @@ const App: React.FC = () => {
               
               {/* Preview Container */}
               <div className="flex-1 p-6 flex flex-col items-center justify-center overflow-auto">
+                 {/* Aspect Ratio Box */}
                  <div 
                     id="display-container"
-                    className="bg-black shadow-2xl relative"
-                    style={{ 
-                      aspectRatio: '16/9', 
-                      width: '100%', 
-                      maxWidth: '1280px',
-                      backgroundColor: 'white' 
-                    }}
+                    className="bg-black shadow-2xl relative transition-all duration-300 ease-in-out"
+                    style={
+                      config.layout.orientation === 'portrait'
+                      ? { 
+                          aspectRatio: '9/16', 
+                          height: '100%', 
+                          width: 'auto', 
+                          maxHeight: '900px',
+                          backgroundColor: 'white' 
+                        }
+                      : { 
+                          aspectRatio: '16/9', 
+                          width: '100%', 
+                          maxWidth: '1280px',
+                          backgroundColor: 'white' 
+                        }
+                    }
                   >
                      <DisplayScreen config={config} />
                   </div>

@@ -26,7 +26,13 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  Volume2
+  Volume2,
+  Megaphone,
+  PaintBucket,
+  Smartphone,
+  MonitorSmartphone,
+  Zap,
+  Clock
 } from 'lucide-react';
 
 interface ConfigPanelProps {
@@ -117,6 +123,36 @@ const ZoneEditor: React.FC<ZoneEditorProps> = ({ label, zoneKey, config, onUpdat
                    className="w-14 text-xs border p-1 rounded text-center"
                   />
                </div>
+
+               {/* Include Current Patient Toggle */}
+               {zone.type === 'waiting-list' && (
+                  <div className="mt-2 bg-yellow-50 p-2 rounded border border-yellow-100 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={zone.includeCurrent || false} 
+                        onChange={(e) => onUpdate(zoneKey, 'includeCurrent', e.target.checked)}
+                        className="accent-yellow-600 h-3.5 w-3.5"
+                      />
+                      <label className="text-[10px] text-yellow-800 font-medium">
+                         合并显示"正在叫号" (Include Current)
+                      </label>
+                    </div>
+                    {zone.includeCurrent && (
+                      <div className="flex items-center gap-2 pl-5">
+                        <input 
+                          type="checkbox" 
+                          checked={zone.highlightCurrent || false} 
+                          onChange={(e) => onUpdate(zoneKey, 'highlightCurrent', e.target.checked)}
+                          className="accent-orange-500 h-3.5 w-3.5"
+                        />
+                        <label className="text-[10px] text-orange-700">
+                           是否特殊样式显示 (Highlight Style)
+                        </label>
+                      </div>
+                    )}
+                  </div>
+               )}
 
                {/* List Layout Config */}
                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-dashed">
@@ -385,6 +421,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
     setSelectedPresetId('');
   };
 
+  // Keyboard shortcut for saving (Ctrl+S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        if (!showSaveModal) {
+          handleOpenSaveModal();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [presets, showSaveModal]);
+
   // --- Config Helpers ---
   const update = (path: string[], value: any) => {
     // Whenever we update layout/design, we simulate a version bump for Hot Reload
@@ -463,7 +513,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
             </select>
          </div>
          <div className="flex items-center gap-1">
-            <button onClick={handleOpenSaveModal} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="保存当前为新预案">
+            <button onClick={handleOpenSaveModal} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="保存当前为新预案 (Ctrl+S)">
               <Plus size={18} />
             </button>
             {selectedPresetId && (
@@ -573,22 +623,50 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
                </div>
                {sections.layout && (
                   <div className="p-3 space-y-5 animate-in fade-in slide-in-from-top-2">
+                     
+                     {/* Orientation Control */}
+                     <div className="bg-gray-50 p-2 rounded border flex items-center justify-between">
+                         <label className="text-xs font-bold text-gray-600 flex items-center gap-1">
+                           <MonitorSmartphone size={14} /> 屏幕方向
+                         </label>
+                         <div className="flex gap-2">
+                            <button 
+                              onClick={() => update(['layout', 'orientation'], 'landscape')}
+                              className={`px-3 py-1 text-xs rounded border transition-colors ${config.layout.orientation === 'landscape' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600'}`}
+                            >
+                              横屏 (16:9)
+                            </button>
+                            <button 
+                              onClick={() => update(['layout', 'orientation'], 'portrait')}
+                              className={`px-3 py-1 text-xs rounded border transition-colors ${config.layout.orientation === 'portrait' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600'}`}
+                            >
+                              竖屏 (9:16)
+                            </button>
+                         </div>
+                     </div>
+
                      <div className="bg-blue-50 p-3 rounded border border-blue-100">
                         <h4 className="text-xs font-bold text-blue-700 mb-3 uppercase">布局比例调整</h4>
-                        <div className="mb-4">
-                           <div className="flex justify-between text-xs mb-1">
-                             <span className="text-gray-600">左右宽度占比</span>
-                             <span className="font-mono">{config.layout.splitRatio}% : {100 - config.layout.splitRatio}%</span>
-                           </div>
-                           <input type="range" min="20" max="80" value={config.layout.splitRatio} onChange={(e) => update(['layout', 'splitRatio'], Number(e.target.value))} className="w-full h-1.5 bg-white rounded-lg appearance-none cursor-pointer accent-blue-600 border border-blue-200"/>
-                        </div>
+                        {config.layout.orientation === 'landscape' ? (
+                          <div className="mb-4">
+                             <div className="flex justify-between text-xs mb-1">
+                               <span className="text-gray-600">左右宽度占比</span>
+                               <span className="font-mono">{config.layout.splitRatio}% : {100 - config.layout.splitRatio}%</span>
+                             </div>
+                             <input type="range" min="20" max="80" value={config.layout.splitRatio} onChange={(e) => update(['layout', 'splitRatio'], Number(e.target.value))} className="w-full h-1.5 bg-white rounded-lg appearance-none cursor-pointer accent-blue-600 border border-blue-200"/>
+                          </div>
+                        ) : (
+                          <div className="mb-4 text-[10px] text-blue-500 bg-blue-100 p-2 rounded">
+                            竖屏模式下，内容将自动上下堆叠显示。
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-4">
                            <div>
-                              <div className="flex justify-between text-xs mb-1 text-gray-600"><span>左列上下</span></div>
+                              <div className="flex justify-between text-xs mb-1 text-gray-600"><span>左/上列上下</span></div>
                               <input type="range" min="20" max="80" value={config.layout.leftSplitRatio} onChange={(e) => update(['layout', 'leftSplitRatio'], Number(e.target.value))} className="w-full h-1.5 bg-white rounded-lg appearance-none cursor-pointer accent-blue-600 border border-blue-200"/>
                            </div>
                            <div>
-                              <div className="flex justify-between text-xs mb-1 text-gray-600"><span>右列上下</span></div>
+                              <div className="flex justify-between text-xs mb-1 text-gray-600"><span>右/下列上下</span></div>
                               <input type="range" min="20" max="80" value={config.layout.rightSplitRatio} onChange={(e) => update(['layout', 'rightSplitRatio'], Number(e.target.value))} className="w-full h-1.5 bg-white rounded-lg appearance-none cursor-pointer accent-blue-600 border border-blue-200"/>
                            </div>
                         </div>
@@ -599,14 +677,18 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
                         </h4>
                         <div className="space-y-4">
                            <div className="space-y-2">
-                              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">左侧区域 (Left Column)</div>
-                              <ZoneEditor label="左上 (Top Left)" zoneKey="topLeft" config={config} onUpdate={handleZoneChange} />
-                              <ZoneEditor label="左下 (Bottom Left)" zoneKey="bottomLeft" config={config} onUpdate={handleZoneChange} />
+                              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center">
+                                {config.layout.orientation === 'landscape' ? '左侧区域 (Left Column)' : '上方区域 (Top Section)'}
+                              </div>
+                              <ZoneEditor label={config.layout.orientation === 'landscape' ? "左上" : "上方-上"} zoneKey="topLeft" config={config} onUpdate={handleZoneChange} />
+                              <ZoneEditor label={config.layout.orientation === 'landscape' ? "左下" : "上方-下"} zoneKey="bottomLeft" config={config} onUpdate={handleZoneChange} />
                            </div>
                            <div className="space-y-2">
-                              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center mt-4">右侧区域 (Right Column)</div>
-                              <ZoneEditor label="右上 (Top Right)" zoneKey="topRight" config={config} onUpdate={handleZoneChange} />
-                              <ZoneEditor label="右下 (Bottom Right)" zoneKey="bottomRight" config={config} onUpdate={handleZoneChange} />
+                              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center mt-4">
+                                {config.layout.orientation === 'landscape' ? '右侧区域 (Right Column)' : '下方区域 (Bottom Section)'}
+                              </div>
+                              <ZoneEditor label={config.layout.orientation === 'landscape' ? "右上" : "下方-上"} zoneKey="topRight" config={config} onUpdate={handleZoneChange} />
+                              <ZoneEditor label={config.layout.orientation === 'landscape' ? "右下" : "下方-下"} zoneKey="bottomRight" config={config} onUpdate={handleZoneChange} />
                            </div>
                         </div>
                      </div>
@@ -617,7 +699,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
             {/* Logic Configuration (Passed Patient) */}
             <div className="bg-white border rounded-lg shadow-sm overflow-hidden p-3">
                <h4 className="text-xs font-bold text-gray-700 mb-2 flex items-center gap-1">
-                 <ListEnd size={14} /> 叫号逻辑配置
+                 <ListEnd size={14} /> 过号逻辑配置 (Pass Logic)
                </h4>
                <div className="space-y-2">
                   <label className="text-xs text-gray-600">过号患者显示方式</label>
@@ -708,10 +790,38 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
                                分诊广播 (Local Only)
                              </button>
                           </div>
+                          
+                          {/* NEW: Local Identity Config */}
+                          <div className="mt-3 pt-3 border-t border-purple-200">
+                              <label className="text-[10px] text-purple-700 font-bold block mb-1 flex items-center gap-1">
+                                 <Megaphone size={10} /> 
+                                 {config.speech.broadcastMode === 'local' 
+                                   ? '当前终端的窗口编号 (Local Window No.)' 
+                                   : '默认窗口号 (Default Window No.)'}
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <input 
+                                  type="text" 
+                                  value={config.windowNumber} 
+                                  onChange={(e) => updateConfig({...config, windowNumber: e.target.value})}
+                                  placeholder="e.g. 1"
+                                  className="w-full text-xs border p-1.5 rounded border-purple-200 focus:ring-purple-500"
+                                />
+                                <div className="text-[9px] text-purple-500 w-32 leading-tight">
+                                   {config.speech.broadcastMode === 'local' 
+                                     ? "仅当患者分配的窗口号 (Window No.) 与此编号一致时，本机才会播放语音。"
+                                     : "仅用于 {number} 模板变量的默认值。"}
+                                </div>
+                              </div>
+                              <div className="mt-2 text-[10px] text-purple-400">
+                                 当前绑定窗口名称: {config.windowName} (仅用于显示)
+                              </div>
+                          </div>
+
                           <p className="text-[10px] text-purple-600 mt-2 leading-relaxed">
                              {config.speech.broadcastMode === 'all' 
                                ? "模式说明：播放所有叫号语音。适用于使用集中式大喇叭广播的场景。" 
-                               : "模式说明：仅播放分配给当前窗口（Window Name）的叫号语音。适用于每个电视机独立发声的场景。"}
+                               : "模式说明：仅播放分配给当前窗口号的叫号语音。"}
                           </p>
                        </div>
 
@@ -838,6 +948,32 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
                          数据库读取模式
                        </button>
                     </div>
+                    
+                    {/* Polling Strategy Configuration */}
+                    <div className="mb-4 bg-green-50 p-3 rounded border border-green-100">
+                         <label className="text-xs font-bold text-green-800 block mb-2 flex items-center gap-1">
+                           <Zap size={14} /> 轮询策略 (Polling Strategy)
+                         </label>
+                         <div className="flex gap-2 mb-2">
+                            <button 
+                               onClick={() => update(['dataSource', 'pollingStrategy'], 'realtime')}
+                               className={`flex-1 py-1.5 text-xs border rounded ${config.dataSource?.pollingStrategy === 'realtime' ? 'bg-green-600 text-white border-green-600 font-bold' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                             >
+                               实时模式 (Realtime)
+                             </button>
+                             <button 
+                               onClick={() => update(['dataSource', 'pollingStrategy'], 'smart')}
+                               className={`flex-1 py-1.5 text-xs border rounded ${config.dataSource?.pollingStrategy === 'smart' ? 'bg-green-600 text-white border-green-600 font-bold' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                             >
+                               智能模式 (Smart)
+                             </button>
+                         </div>
+                         <p className="text-[10px] text-green-600 leading-relaxed">
+                            {config.dataSource?.pollingStrategy === 'smart' 
+                              ? "智能模式：当界面仅显示静态文本/富文本时，自动暂停数据库查询以节省带宽。界面布局变更仍会通过版本号检测自动触发刷新(Hot Reload)。" 
+                              : "实时模式：始终按间隔查询数据库，适用于所有场景。"}
+                         </p>
+                    </div>
 
                     {config.dataSource?.mode === 'pull' ? (
                        <div className="space-y-4 animate-in fade-in slide-in-from-top-1">
@@ -912,7 +1048,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, updateConfig }) => {
                                {k:'name', n:'患者姓名 (Name)'}, 
                                {k:'number', n:'排队号码 (Number)'}, 
                                {k:'status', n:'状态字段 (Status)'}, 
-                               {k:'windowId', n:'窗口过滤 (Window ID)'}
+                               {k:'windowId', n:'窗口过滤 (Window ID)'},
+                               {k:'order', n:'排序字段 (Order)'}
                               ].map(f => (
                                 <div key={f.k} className="flex items-center gap-2">
                                    <span className="text-[10px] w-24 text-gray-500 text-right">{f.n}</span>

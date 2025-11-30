@@ -1,7 +1,7 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
-import { Settings, Image, Key, Type, Database } from 'lucide-react';
+import { Settings, Image, Key, Type, Database, Save, Check } from 'lucide-react';
 
 interface SystemSettingsProps {
   settings: GlobalSystemSettings;
@@ -9,17 +9,30 @@ interface SystemSettingsProps {
 }
 
 const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate }) => {
-  
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
   const handleChange = (key: keyof GlobalSystemSettings, value: any) => {
     onUpdate({ ...settings, [key]: value });
+    setSaveStatus('idle');
+  };
+
+  const handleSave = () => {
+    setSaveStatus('saving');
+    // Simulate API/LocalStorage save delay
+    setTimeout(() => {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+    }, 500);
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-        <Settings className="text-gray-600" />
-        系统全局设置
-      </h2>
+    <div className="p-8 max-w-4xl mx-auto pb-24">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <Settings className="text-gray-600" />
+          系统全局设置
+        </h2>
+      </div>
 
       <div className="space-y-6">
         
@@ -112,6 +125,20 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate }) =
            </div>
         </section>
 
+      </div>
+
+      {/* Floating Save Button */}
+      <div className="fixed bottom-8 right-8 z-20">
+         <button 
+           onClick={handleSave}
+           className={`
+             flex items-center gap-2 px-6 py-3 rounded-full shadow-xl font-bold transition-all transform hover:scale-105 active:scale-95
+             ${saveStatus === 'saved' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}
+           `}
+         >
+           {saveStatus === 'saved' ? <Check size={20} /> : <Save size={20} />}
+           {saveStatus === 'saved' ? '保存成功' : saveStatus === 'saving' ? '保存中...' : '保存设置'}
+         </button>
       </div>
     </div>
   );

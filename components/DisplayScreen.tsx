@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
-import { WifiOff, Activity } from 'lucide-react';
+import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
 
 interface DisplayScreenProps {
   config: QueueConfig;
@@ -31,6 +31,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   // Responsive Check: TV/Desktop vs Mobile/Tablet
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
+  // Determine Layout Mode
+  const isHorizontal = layout.orientation === 'landscape' && isLargeScreen;
+
   // Track the last called ID and timestamp to handle deduplication and recalls
   const lastCalledRef = useRef<{id: string, ts: number} | null>(null);
 
@@ -40,6 +43,27 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // --- Optimization Logic: Detect if current layout is Static Text Only ---
+  const isStaticOnly = useMemo(() => {
+    // Check all 4 zones
+    const zones = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
+    const hasDynamicContent = zones.some(z => 
+       z.type === 'waiting-list' || 
+       z.type === 'current-call' || 
+       z.type === 'window-info' || // Often contains dynamic window number
+       z.type === 'passed-list'
+    );
+    return !hasDynamicContent;
+  }, [layout.topLeft.type, layout.topRight.type, layout.bottomLeft.type, layout.bottomRight.type]);
+
+  const pollingStatus = useMemo(() => {
+     if (config.dataSource?.pollingStrategy === 'smart' && isStaticOnly) {
+        return 'paused';
+     }
+     return 'active';
+  }, [config.dataSource?.pollingStrategy, isStaticOnly]);
+
 
   // --- Speech Synthesis Logic ---
   useEffect(() => {
@@ -57,9 +81,18 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     if (isNewCall || isRecall) {
       // Check Broadcast Mode
       if (speech.broadcastMode === 'local') {
-         // If patient's assigned window doesn't match this screen's window name, don't speak
-         if (p.windowName && p.windowName !== config.windowName) {
-           // Skip audio, but update ref to avoid re-triggering loop
+         // Strict Check: Match Window Number (Preferred)
+         const pWinNum = p.windowNumber;
+         const cWinNum = config.windowNumber;
+         
+         if (pWinNum && cWinNum) {
+           // If numbers are available, strict match
+           if (pWinNum !== cWinNum) {
+              lastCalledRef.current = { id: p.id, ts: p.callTimestamp || 0 };
+              return;
+           }
+         } else if (p.windowName && p.windowName !== config.windowName) {
+           // Fallback: If no number, check Window Name
            lastCalledRef.current = { id: p.id, ts: p.callTimestamp || 0 };
            return; 
          }
@@ -77,7 +110,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       speak(textToSpeak);
     }
-  }, [config.currentPatient, speech, config.windowName]);
+  }, [config.currentPatient, speech, config.windowName, config.windowNumber]);
 
   const speak = (text: string) => {
     // Basic browser TTS
@@ -137,12 +170,12 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     return date.toLocaleTimeString('zh-CN', { hour12: false });
   };
 
-  const renderQueueNumber = (number: string, style: QueueNumberStyle, fontSizeClass: string = 'text-sm') => {
+  const renderQueueNumber = (number: string, style: QueueNumberStyle, fontSizeClass: string = 'text-sm', isCurrent?: boolean) => {
     if (!config.showQueueNumber) return null;
 
     if (style === 'none') {
        // Just colored text, no background box
-       return <span className={`${fontSizeClass} ml-2 font-bold text-teal-600`}>{number}</span>;
+       return <span className={`${fontSizeClass} font-bold ${isCurrent ? 'text-white' : 'text-teal-600'}`}>{number}</span>;
     }
 
     // Badge Styles
@@ -153,7 +186,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     
     return (
       <span 
-        className={`${baseClasses} ${shapeClass} ${fontSizeClass} bg-teal-500`}
+        className={`${baseClasses} ${shapeClass} ${fontSizeClass} ${isCurrent ? 'bg-orange-500' : 'bg-teal-500'}`}
         style={{ minWidth: '2.5em' }}
       >
         {number}
@@ -234,8 +267,14 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       case 'waiting-list':
         // Determine list content based on mode
-        let displayList: (Patient & { isPassed?: boolean })[] = [...config.waitingList];
+        let displayList: (Patient & { isPassed?: boolean, isCurrent?: boolean })[] = [...config.waitingList];
         
+        // --- Merge Current Patient Logic ---
+        if (zoneConfig.includeCurrent && config.currentPatient && config.currentPatient.id) {
+           displayList = [{ ...config.currentPatient, isCurrent: true }, ...displayList];
+        }
+
+        // --- Merge Passed Patient Logic ---
         if (config.passedDisplayMode === 'wait-list-end') {
           const passedPatients = config.passedList.map(p => ({ ...p, isPassed: true }));
           displayList = [...displayList, ...passedPatients];
@@ -265,20 +304,36 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
              >
                {visibleWaiting.map((patient) => {
                   const isGrayed = patient.isPassed && config.grayOutPassed;
+                  const isCurrent = patient.isCurrent;
+                  
+                  // Highlight logic only applies if enabled and isCurrent
+                  const isHighlighted = isCurrent && zoneConfig.highlightCurrent;
+
                   return (
                     <div 
                       key={patient.id} 
                       className={`
-                        border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit relative
-                        ${isGrayed ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-gray-50 border-gray-100'}
+                        border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit gap-2
+                        ${isGrayed ? 'bg-gray-100 border-gray-200 text-gray-400' : ''}
+                        ${isHighlighted ? 'bg-orange-50 border-orange-200 ring-1 ring-orange-200' : ''}
+                        ${!isGrayed && !isHighlighted ? 'bg-gray-50 border-gray-100' : ''}
                       `}
                     >
-                      <span className={`font-bold truncate ${isGrayed ? 'text-gray-400 decoration-slate-400' : 'text-gray-700'}`} style={{ fontSize: `${zoneConfig.contentFontSize || 24}px` }}>
-                        {patient.name}
-                      </span>
-                      {isGrayed && <span className="absolute right-12 text-[10px] bg-gray-200 px-1 rounded">过号</span>}
-                      <div className={isGrayed ? 'opacity-50 grayscale' : ''}>
-                         {renderQueueNumber(patient.number, config.queueNumberStyle)}
+                      {/* Name and Badges Container */}
+                      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                        <span className={`font-bold truncate ${isGrayed ? 'text-gray-400 decoration-slate-400' : isHighlighted ? 'text-orange-700' : 'text-gray-700'}`} style={{ fontSize: `${zoneConfig.contentFontSize || 24}px` }}>
+                          {patient.name}
+                        </span>
+                        
+                        {isGrayed && <span className="flex-shrink-0 text-[10px] bg-gray-200 px-1 rounded whitespace-nowrap">过号</span>}
+                        {isCurrent && isHighlighted && (
+                           <span className="flex-shrink-0 text-[10px] bg-orange-200 text-orange-800 px-1 rounded font-bold animate-pulse whitespace-nowrap">正在叫号</span>
+                        )}
+                      </div>
+
+                      {/* Number Container (Right aligned) */}
+                      <div className={`flex-shrink-0 ${isGrayed ? 'opacity-50 grayscale' : ''}`}>
+                         {renderQueueNumber(patient.number, config.queueNumberStyle, 'text-sm', isHighlighted)}
                       </div>
                     </div>
                   );
@@ -348,13 +403,13 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   const hasRight = layout.topRight.type !== 'hidden' || layout.bottomRight.type !== 'hidden';
   
   // Calculate final widths based on visibility and screen size
-  // On Mobile: Width is 100%
-  // On Desktop: Width is determined by splitRatio
-  const leftWidth = isLargeScreen 
+  // If Portrait/Mobile: Width is 100%
+  // If Landscape Large Screen: Width is determined by splitRatio
+  const leftWidth = isHorizontal 
     ? (hasLeft && hasRight ? `${layout.splitRatio}%` : (hasLeft ? '100%' : '0%')) 
     : '100%';
   
-  const rightWidth = isLargeScreen 
+  const rightWidth = isHorizontal 
     ? (hasLeft && hasRight ? `${100 - layout.splitRatio}%` : (hasRight ? '100%' : '0%')) 
     : '100%';
 
@@ -371,13 +426,33 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
       className="w-full h-full flex flex-col relative overflow-hidden"
       style={{ backgroundColor: '#e5e7eb' }}
     >
-      {/* --- Hot Reload Indicator (Simulated) --- */}
+      {/* --- Hot Reload & Polling Status Indicator --- */}
       {config.configVersion && (
-        <div className="absolute top-0 right-0 p-1 opacity-20 hover:opacity-100 z-50 pointer-events-none transition-opacity">
-           <span className="text-[10px] bg-black text-white px-1 rounded flex items-center gap-1">
-             <Activity size={8} className="animate-pulse" />
-             {config.configVersion}
-           </span>
+        <div className="absolute top-0 left-0 p-1 z-50 pointer-events-none flex flex-col gap-1">
+           {/* Version Badge */}
+           <div className="opacity-20 hover:opacity-100 transition-opacity">
+               <span className="text-[10px] bg-black text-white px-1 rounded flex items-center gap-1">
+                 <Activity size={8} className="animate-pulse" />
+                 {config.configVersion}
+               </span>
+           </div>
+           
+           {/* Smart Polling Indicator (Visible when Paused) */}
+           {pollingStatus === 'paused' && (
+             <div className="animate-in slide-in-from-left duration-300">
+               <span className="text-[10px] bg-yellow-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md font-bold opacity-80">
+                 <PauseCircle size={10} />
+                 数据库轮询: 已暂停 (静态内容)
+               </span>
+             </div>
+           )}
+           
+           {/* Debug Active State (Optional, typically hidden or transient) */}
+           {/* {pollingStatus === 'active' && (
+              <span className="text-[10px] bg-green-500 text-white px-1 rounded flex items-center gap-1 w-fit opacity-20">
+                <RefreshCw size={8} className="animate-spin" /> DB Sync
+              </span>
+           )} */}
         </div>
       )}
 
@@ -438,20 +513,21 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       {/* --- MAIN CONTENT (Dynamic Grid) --- */}
       <main 
-        className={`flex-1 flex overflow-hidden ${isLargeScreen ? 'flex-row' : 'flex-col'}`}
+        className={`flex-1 flex overflow-hidden ${isHorizontal ? 'flex-row' : 'flex-col'}`}
         style={{ padding: `${layout.containerPadding}px`, gap: `${layout.gap}px` }}
       >
         
-        {/* Left Column */}
+        {/* Left Column (or Top Section in Portrait) */}
         {hasLeft && (
           <div 
              className="flex flex-col transition-all duration-300" 
              style={{ 
                width: leftWidth, 
                gap: `${layout.gap}px`,
-               // On mobile, let flex handle height. On desktop, height is 100%
-               height: isLargeScreen ? '100%' : 'auto', 
-               flex: isLargeScreen ? undefined : 1
+               // If horizontal: Height is 100%, flex is set by logic above
+               // If vertical/mobile: Height is auto, or controlled by splitRatio if we wanted to enforce it
+               height: isHorizontal ? '100%' : 'auto', 
+               flex: isHorizontal ? undefined : 1
              }}
           >
             
@@ -479,15 +555,15 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
           </div>
         )}
 
-        {/* Right Column */}
+        {/* Right Column (or Bottom Section in Portrait) */}
         {hasRight && (
           <div 
              className="flex flex-col transition-all duration-300"
              style={{ 
                width: rightWidth, 
                gap: `${layout.gap}px`,
-               height: isLargeScreen ? '100%' : 'auto',
-               flex: isLargeScreen ? undefined : 1
+               height: isHorizontal ? '100%' : 'auto',
+               flex: isHorizontal ? undefined : 1
              }}
           >
             

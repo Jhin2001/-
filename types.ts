@@ -4,7 +4,9 @@ export interface Patient {
   name: string;
   number: string;
   windowName?: string; // Specific window name for centralized calling
+  windowNumber?: string; // Specific window number for local binding
   callTimestamp?: number; // To identify unique call events (e.g. recall)
+  checkInTime?: number; // When the patient was registered/checked in
 }
 
 export interface ThemeColors {
@@ -31,6 +33,8 @@ export interface ZoneConfig {
   gridColumns?: number; // 1, 2, 3, 4
   gridRows?: number; // Limits the number of items shown (Cols * Rows)
   contentFontSize?: number; // For patient names in list
+  includeCurrent?: boolean; // New: If true, shows current calling patient at top of waiting list
+  highlightCurrent?: boolean; // New: If true, applies special styling to the included current patient
   
   // Static Text Specific
   staticTextContent?: string; // For rich text/static notices
@@ -73,12 +77,13 @@ export interface HeaderConfig {
 }
 
 export interface LayoutConfig {
+  orientation: 'landscape' | 'portrait'; // New: Screen Orientation
   // Global padding/spacing
   gap: number;
   containerPadding: number;
   
   // Ratios (0-100)
-  splitRatio: number; // Width of Left Column %
+  splitRatio: number; // Width of Left Column % (Landscape) or Height of Top Section % (Portrait)
   leftSplitRatio: number; // Height of Top-Left %
   rightSplitRatio: number; // Height of Top-Right %
 
@@ -100,6 +105,9 @@ export type DatabaseType = 'mysql' | 'sqlserver' | 'oracle' | 'postgresql';
 
 export interface DataSourceConfig {
   mode: 'push' | 'pull'; // Push via API or Pull from DB View
+  
+  // Polling Strategy
+  pollingStrategy: 'realtime' | 'smart'; // New: 'smart' disables DB polling if content is static
   
   // Pull Mode Config
   dbType: DatabaseType;
