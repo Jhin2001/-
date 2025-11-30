@@ -6,6 +6,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSystemSettings = {
   loginSubtitle: 'Distributed Queue Management System',
   loginBackgroundImage: 'https://images.unsplash.com/photo-1516549655169-df83a0929519?q=80&w=2070&auto=format&fit=crop',
   adminPassword: '123456',
+  apiBaseUrl: 'https://localhost:30335/api/v1', // Updated to VS IIS Express port
   apiPort: 8080,
   systemName: '南部市中心医院'
 };
@@ -90,6 +91,7 @@ export const DEFAULT_CONFIG: QueueConfig = {
     orientation: 'landscape', // Default
     gap: 16,
     containerPadding: 16,
+    overscanPadding: 0, // Default 0
     splitRatio: 40, // 40% Width for Left Column (Landscape)
     leftSplitRatio: 50, // 50% Height for Top Left
     rightSplitRatio: 50, // 50% Height for Top Right

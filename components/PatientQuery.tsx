@@ -1,11 +1,14 @@
 
+
 import React, { useState } from 'react';
 import { QueueConfig, Patient } from '../types';
 import { Search, Filter, RotateCcw, ArrowRight, ArrowUp, Trash2, Clock, Monitor } from 'lucide-react';
+import api from '../services/api';
 
 interface PatientQueryProps {
   config: QueueConfig;
   onUpdateConfig?: (newConfig: QueueConfig) => void;
+  isConnected?: boolean;
 }
 
 type PatientStatus = 'all' | 'calling' | 'waiting' | 'passed';
@@ -15,7 +18,7 @@ interface HistoryItem extends Patient {
   statusLabel: string;
 }
 
-const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) => {
+const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isConnected }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<PatientStatus>('all');
   const [windowFilter, setWindowFilter] = useState<string>('all');
@@ -79,7 +82,14 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
 
   // --- Operations Logic ---
 
-  const handlePass = (patient: HistoryItem) => {
+  const handlePass = async (patient: HistoryItem) => {
+    if (isConnected) {
+        try {
+            await api.queue.pass(patient.id);
+        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+        return;
+    }
+
     if (!onUpdateConfig) return;
     
     // Logic: Move from Current/Waiting -> Passed
@@ -105,7 +115,14 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
     });
   };
 
-  const handleRecall = (patient: HistoryItem) => {
+  const handleRecall = async (patient: HistoryItem) => {
+     if (isConnected) {
+        try {
+            await api.queue.recall(patient.id);
+        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+        return;
+     }
+
      if (!onUpdateConfig) return;
 
      if (patient.status === 'calling') {
@@ -117,7 +134,14 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
      }
   };
 
-  const handleRestore = (patient: HistoryItem) => {
+  const handleRestore = async (patient: HistoryItem) => {
+    if (isConnected) {
+        try {
+            await api.queue.restore(patient.id);
+        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+        return;
+    }
+
     if (!onUpdateConfig) return;
     // Move from Passed -> Waiting (End)
     const newPassed = config.passedList.filter(p => p.id !== patient.id);
@@ -130,7 +154,14 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
     });
   };
 
-  const handleTop = (patient: HistoryItem) => {
+  const handleTop = async (patient: HistoryItem) => {
+    if (isConnected) {
+        try {
+            await api.queue.top(patient.id);
+        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+        return;
+    }
+
     if (!onUpdateConfig) return;
     // Move from Waiting -> Waiting (Index 0)
     const filteredWaiting = config.waitingList.filter(p => p.id !== patient.id);
@@ -142,9 +173,16 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
     });
   };
 
-  const handleDelete = (patient: HistoryItem) => {
-     if (!onUpdateConfig) return;
+  const handleDelete = async (patient: HistoryItem) => {
      if (confirm(`确定要删除 ${patient.name} 吗?`)) {
+        if (isConnected) {
+            try {
+                await api.queue.delete(patient.id);
+            } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+            return;
+        }
+
+        if (!onUpdateConfig) return;
         if (patient.status === 'waiting') {
            onUpdateConfig({
              ...config,
@@ -329,7 +367,7 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig }) =
           </div>
           <div className="p-4 border-t bg-gray-50 text-xs text-gray-500 flex justify-between">
              <span>显示 {filteredPatients.length} 条记录</span>
-             <span>数据源: 内存模拟 (Real-time Config)</span>
+             <span>数据源: {isConnected ? '实时 API (Live)' : '内存模拟 (Local)'}</span>
           </div>
        </div>
     </div>

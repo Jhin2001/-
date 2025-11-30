@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DisplayScreen from './components/DisplayScreen';
 import ConfigPanel from './components/ConfigPanel';
 import LoginPage from './components/LoginPage';
@@ -8,19 +7,27 @@ import SystemSettings from './components/SystemSettings';
 import PatientQuery from './components/PatientQuery';
 import { DEFAULT_CONFIG, DEFAULT_GLOBAL_SETTINGS, DEFAULT_DEVICES } from './constants';
 import { QueueConfig, GlobalSystemSettings, DeviceBinding, Preset, Patient } from './types';
-import { MonitorPlay, Layout, Settings, LogOut, Monitor, Menu, Mic, RotateCcw, ArrowRight, Search } from 'lucide-react';
+import { MonitorPlay, Layout, Settings, LogOut, Monitor, Menu, Mic, RotateCcw, ArrowRight, Search, CloudOff, CloudLightning, WifiOff } from 'lucide-react';
+import api from './services/api';
 
 type View = 'dashboard' | 'devices' | 'settings' | 'designer' | 'query';
 
 const App: React.FC = () => {
   // --- Auth State ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isTvMode, setIsTvMode] = useState(false);
   
   // --- Data State ---
   const [globalSettings, setGlobalSettings] = useState<GlobalSystemSettings>(DEFAULT_GLOBAL_SETTINGS);
   const [devices, setDevices] = useState<DeviceBinding[]>(DEFAULT_DEVICES);
-  const [config, setConfig] = useState<QueueConfig>(DEFAULT_CONFIG); // Active config for Designer
-  const [presets, setPresets] = useState<Preset[]>([]); // To track available presets for binding
+  const [config, setConfig] = useState<QueueConfig>(DEFAULT_CONFIG); // Active config
+  const [presets, setPresets] = useState<Preset[]>([]); 
+  
+  // Data Polling State
+  const [dataVersion, setDataVersion] = useState<string>('init');
+  const [isPolling, setIsPolling] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'offline' | 'init'>('init');
+  const [lastPollTime, setLastPollTime] = useState(Date.now());
 
   // --- UI State ---
   const [currentView, setCurrentView] = useState<View>('devices');
@@ -36,30 +43,159 @@ const App: React.FC = () => {
     if (savedSettings) setGlobalSettings(JSON.parse(savedSettings));
 
     // 3. Devices
+    let loadedDevices = DEFAULT_DEVICES;
     const savedDevices = localStorage.getItem('pqms_devices');
-    if (savedDevices) setDevices(JSON.parse(savedDevices));
+    if (savedDevices) {
+      loadedDevices = JSON.parse(savedDevices);
+      setDevices(loadedDevices);
+    }
 
-    // 4. Load Presets (needed for Device Manager dropdowns)
+    // 4. Load Presets & Check TV Mode
     const savedPresets = localStorage.getItem('pharmacy-queue-presets');
+    let loadedPresets: Preset[] = [];
+    
     if (savedPresets) {
-      setPresets(JSON.parse(savedPresets));
+      loadedPresets = JSON.parse(savedPresets);
+      setPresets(loadedPresets);
     } else {
-      // Create a default preset if none exist
       const defaultPreset: Preset = { id: 'default', name: '默认样式', timestamp: Date.now(), config: DEFAULT_CONFIG };
+      loadedPresets = [defaultPreset];
       setPresets([defaultPreset]);
       localStorage.setItem('pharmacy-queue-presets', JSON.stringify([defaultPreset]));
     }
+
+    // --- TV Mode Logic ---
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'tv') {
+       setIsTvMode(true);
+       setIsLoggedIn(true); // Bypass login for TV
+       
+       const devId = params.get('deviceId');
+       if (devId) {
+          // Find Device Config
+          const device = loadedDevices.find(d => d.id === devId || d.name === devId);
+          if (device && device.linkedPresetId) {
+             const preset = loadedPresets.find(p => p.id === device.linkedPresetId);
+             if (preset) {
+                // Merge device specific overrides (like Window No) into the preset config
+                const mergedConfig = {
+                  ...preset.config,
+                  windowNumber: device.assignedWindowNumber || preset.config.windowNumber,
+                  windowName: device.assignedWindowName || preset.config.windowName,
+                  system: {
+                     ...preset.config.system,
+                     deviceId: device.id,
+                     deviceIp: device.ipAddress || '',
+                     deviceMac: device.macAddress || '',
+                     isRegistered: true
+                  }
+                };
+                setConfig(mergedConfig);
+             }
+          }
+       }
+    }
+
   }, []);
 
-  // Persist Updates
-  const handleUpdateSettings = (newSettings: GlobalSystemSettings) => {
+  // --- Real Data Polling Hook ---
+  useEffect(() => {
+    // Poll if in TV mode OR if Logged In (Admin Mode) to maintain connection status for CRUD operations
+    // This ensures API features are available immediately in Device Manager/Settings
+    const shouldPoll = isTvMode || isLoggedIn;
+    
+    if (!shouldPoll) {
+       setIsPolling(false);
+       setConnectionStatus('init'); // Reset status if stopping polling
+       return;
+    }
+
+    const intervalSeconds = Math.max(config.dataSource?.pollingInterval || 5, 1);
+    setIsPolling(true);
+
+    const pollData = async () => {
+      try {
+        const windowFilter = config.speech?.broadcastMode === 'local' ? config.windowNumber : undefined;
+        
+        // Call Backend API
+        const snapshot = await api.queue.getSnapshot(windowFilter);
+        
+        setConnectionStatus('connected');
+        
+        // Version Check: Only update state if data version changed
+        if (snapshot.version !== dataVersion) {
+            setConfig(prev => ({
+               ...prev,
+               currentPatient: snapshot.currentPatient || { id: '', name: '', number: '' },
+               waitingList: snapshot.waitingList || [],
+               passedList: snapshot.passedList || [],
+            }));
+            setDataVersion(snapshot.version);
+            setLastPollTime(Date.now());
+        }
+      } catch (err) {
+         setConnectionStatus('offline');
+      }
+    };
+
+    // Execute immediately to check connection right away
+    pollData();
+
+    const timer = setInterval(pollData, intervalSeconds * 1000);
+
+    return () => clearInterval(timer);
+  }, [isTvMode, isLoggedIn, config.dataSource?.pollingInterval, config.dataSource?.pollingStrategy, config.windowNumber, config.speech?.broadcastMode, dataVersion]);
+
+
+  // --- Sync System Settings from API when Connected ---
+  useEffect(() => {
+      if (connectionStatus === 'connected') {
+          api.admin.getSystemSettings()
+             .then(remoteSettings => {
+                 // Merge remote settings but keep local apiBaseUrl (as it defines the connection)
+                 setGlobalSettings(prev => ({
+                     ...remoteSettings,
+                     apiBaseUrl: prev.apiBaseUrl 
+                 }));
+             })
+             .catch(e => {
+                const msg = e.message || '';
+                // If endpoint doesn't exist (404) or network error (Failed to fetch), use local settings
+                if (msg.includes('404') || msg.includes('Failed to fetch')) {
+                    console.warn("Could not sync system settings from API (Using local defaults):", msg);
+                } else {
+                    console.error("Failed to fetch system settings from API", e);
+                }
+             });
+      }
+  }, [connectionStatus]);
+
+  // Persist Updates (Hybrid: LocalStorage for Connection, API for Data)
+  const handleUpdateSettings = async (newSettings: GlobalSystemSettings) => {
     setGlobalSettings(newSettings);
+    
+    // Always save locally to persist API URL
     localStorage.setItem('pqms_settings', JSON.stringify(newSettings));
+    
+    // If connected, also save to DB
+    if (connectionStatus === 'connected') {
+        try {
+            await api.admin.saveSystemSettings(newSettings);
+        } catch(e: any) {
+            console.error("Failed to save settings to API", e);
+            if (!e.message?.includes('404')) {
+                alert("保存至数据库失败，仅保存到本地缓存");
+            }
+        }
+    }
   };
 
   const handleUpdateDevices = (newDevices: DeviceBinding[]) => {
     setDevices(newDevices);
-    localStorage.setItem('pqms_devices', JSON.stringify(newDevices));
+    // If offline, save locally
+    if (connectionStatus !== 'connected') {
+       localStorage.setItem('pqms_devices', JSON.stringify(newDevices));
+    }
   };
 
   const handleLogin = (success: boolean) => {
@@ -74,14 +210,19 @@ const App: React.FC = () => {
     localStorage.removeItem('pqms_auth');
   };
 
-  // --- Simulation Actions ---
-  const simulateCallNext = () => {
+  // --- Simulation Actions (Local Override or API) ---
+  const simulateCallNext = async () => {
+     if (connectionStatus === 'connected') {
+        try {
+            await api.queue.callNext(config.windowNumber || '1');
+        } catch(e) { console.error('API Error', e); alert('操作失败'); }
+        return;
+     }
+
      if (config.waitingList.length === 0) return;
      const next = config.waitingList[0];
      const newWaiting = config.waitingList.slice(1);
      
-     // Update current patient with new timestamp to trigger call
-     // IMPORTANT: For 'Local Broadcast' simulation, we assign the patient to the current window name/number
      const updatedNext = { 
        ...next, 
        callTimestamp: Date.now(),
@@ -96,15 +237,18 @@ const App: React.FC = () => {
      });
   };
 
-  const simulatePassCurrent = () => {
+  const simulatePassCurrent = async () => {
+     if (connectionStatus === 'connected' && config.currentPatient.id) {
+        try {
+            await api.queue.pass(config.currentPatient.id);
+        } catch(e) { console.error('API Error', e); alert('操作失败'); }
+        return;
+     }
+
      if (!config.currentPatient.id) return;
      const passedOne = config.currentPatient;
-     
-     // Move current to passed list
      const newPassed = [passedOne, ...config.passedList].slice(0, 20);
-     
-     // Pull next from waiting
-     const next = config.waitingList.length > 0 ? config.waitingList[0] : { id: '', name: '---', number: '---' };
+     const next = config.waitingList.length > 0 ? config.waitingList[0] : { id: '', name: '---', number: '---' } as Patient;
      const newWaiting = config.waitingList.length > 0 ? config.waitingList.slice(1) : [];
 
      setConfig({
@@ -115,11 +259,15 @@ const App: React.FC = () => {
      });
   };
 
-  const simulateRecall = () => {
+  const simulateRecall = async () => {
+    if (connectionStatus === 'connected' && config.currentPatient.id) {
+        try {
+            await api.queue.recall(config.currentPatient.id);
+        } catch(e) { console.error('API Error', e); alert('操作失败'); }
+        return;
+    }
+
     if (!config.currentPatient.id) return;
-    
-    // Update timestamp to force re-trigger effect in DisplayScreen
-    // Ensure windowName is set correctly for simulation
     setConfig({
       ...config,
       currentPatient: { 
@@ -129,13 +277,18 @@ const App: React.FC = () => {
         windowNumber: config.windowNumber
       }
     });
-    
-    // Visual feedback handled by audio effect mostly, but let's log
-    console.log(`Recalling: ${config.currentPatient.name}`);
   };
 
-  // --- Render Logic ---
+  // --- Render TV Mode ---
+  if (isTvMode) {
+     return (
+       <div className="h-screen w-screen overflow-hidden bg-black">
+          <DisplayScreen config={config} />
+       </div>
+     );
+  }
 
+  // --- Render Admin Mode ---
   if (!isLoggedIn) {
     return <LoginPage settings={globalSettings} onLogin={handleLogin} />;
   }
@@ -201,6 +354,7 @@ const App: React.FC = () => {
               devices={devices} 
               presets={presets} 
               onUpdateDevices={handleUpdateDevices} 
+              isConnected={connectionStatus === 'connected'}
             />
           </div>
         )}
@@ -210,7 +364,8 @@ const App: React.FC = () => {
           <div className="flex-1 overflow-y-auto bg-gray-100">
             <SystemSettings 
               settings={globalSettings} 
-              onUpdate={handleUpdateSettings} 
+              onUpdate={handleUpdateSettings}
+              isConnected={connectionStatus === 'connected'}
             />
           </div>
         )}
@@ -218,7 +373,11 @@ const App: React.FC = () => {
          {/* Patient Query View */}
          {currentView === 'query' && (
           <div className="flex-1 overflow-y-auto bg-gray-100">
-            <PatientQuery config={config} onUpdateConfig={setConfig} />
+            <PatientQuery 
+              config={config} 
+              onUpdateConfig={setConfig} 
+              isConnected={connectionStatus === 'connected'}
+            />
           </div>
         )}
 
@@ -232,8 +391,26 @@ const App: React.FC = () => {
                     <MonitorPlay size={18} className="text-blue-600" />
                     <span>预案预览</span>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    此界面仅为预览，实际显示取决于终端绑定的预案
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    {isPolling ? (
+                       connectionStatus === 'connected' ? (
+                          <span className="flex items-center gap-1 text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-100">
+                              <CloudLightning size={12} /> 实时 API 连接中 ({config.dataSource?.pollingInterval || 5}s)
+                          </span>
+                       ) : connectionStatus === 'offline' ? (
+                          <span className="flex items-center gap-1 text-red-500 bg-red-50 px-2 py-0.5 rounded border border-red-100 animate-pulse">
+                              <WifiOff size={12} /> 后端未连接 (请检查 API 地址)
+                          </span>
+                       ) : (
+                          <span className="flex items-center gap-1 text-gray-400 bg-gray-50 px-2 py-0.5 rounded border border-gray-100">
+                              <CloudLightning size={12} /> 正在连接...
+                          </span>
+                       )
+                    ) : (
+                       <span className="flex items-center gap-1 text-gray-400 bg-gray-50 px-2 py-0.5 rounded border border-gray-100">
+                          <CloudOff size={12} /> 仅本地模拟
+                       </span>
+                    )}
                   </div>
               </div>
               
@@ -249,13 +426,13 @@ const App: React.FC = () => {
                           aspectRatio: '9/16', 
                           height: '100%', 
                           width: 'auto', 
-                          maxHeight: '900px',
+                          maxHeight: '900px', 
                           backgroundColor: 'white' 
                         }
                       : { 
                           aspectRatio: '16/9', 
                           width: '100%', 
-                          maxWidth: '1280px',
+                          maxWidth: '1280px', 
                           backgroundColor: 'white' 
                         }
                     }
@@ -265,7 +442,10 @@ const App: React.FC = () => {
 
                  {/* Simulation Bar */}
                  <div className="mt-4 bg-white rounded-lg shadow-sm border p-3 flex items-center gap-4 w-full max-w-4xl">
-                     <span className="text-xs font-bold text-gray-500 uppercase">叫号模拟测试:</span>
+                     <span className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                        {connectionStatus === 'connected' ? <CloudLightning size={12} className="text-green-500"/> : <CloudOff size={12}/>}
+                        {connectionStatus === 'connected' ? 'API 叫号操作:' : '叫号模拟测试 (本地):'}
+                     </span>
                      <button 
                        onClick={simulateCallNext}
                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
@@ -305,6 +485,7 @@ const App: React.FC = () => {
                   const saved = localStorage.getItem('pharmacy-queue-presets');
                   if (saved) setPresets(JSON.parse(saved));
                 }} 
+                isConnected={connectionStatus === 'connected'}
               />
             </div>
           </div>

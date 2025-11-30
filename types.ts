@@ -81,6 +81,7 @@ export interface LayoutConfig {
   // Global padding/spacing
   gap: number;
   containerPadding: number;
+  overscanPadding: number; // New: Padding for TV overscan protection
   
   // Ratios (0-100)
   splitRatio: number; // Width of Left Column % (Landscape) or Height of Top Section % (Portrait)
@@ -220,7 +221,8 @@ export interface GlobalSystemSettings {
   adminPassword: string; // Default 123456
   
   // System Global
-  apiPort: number;
+  apiBaseUrl: string; // e.g. http://localhost:5000/api/v1
+  apiPort: number; // Legacy
   systemName: string;
 }
 

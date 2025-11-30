@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
 import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
+import { DEFAULT_CONFIG } from '../constants';
 
 interface DisplayScreenProps {
   config: QueueConfig;
@@ -26,7 +26,8 @@ const useMediaQuery = (query: string) => {
 
 const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const { theme, layout, header, system, speech } = config;
+  // Default speech to DEFAULT_CONFIG.speech to prevent undefined access if config is partial
+  const { theme, layout, header, system, speech = DEFAULT_CONFIG.speech } = config;
   
   // Responsive Check: TV/Desktop vs Mobile/Tablet
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
@@ -65,9 +66,36 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   }, [config.dataSource?.pollingStrategy, isStaticOnly]);
 
 
+  // --- TV Adaptation: Hide Cursor on Inactivity ---
+  useEffect(() => {
+    let cursorTimer: any;
+    const hideCursor = () => document.body.style.cursor = 'none';
+    const showCursor = () => {
+      document.body.style.cursor = 'default';
+      clearTimeout(cursorTimer);
+      cursorTimer = setTimeout(hideCursor, 3000);
+    };
+
+    window.addEventListener('mousemove', showCursor);
+    window.addEventListener('click', showCursor);
+    window.addEventListener('touchstart', showCursor);
+
+    // Initial timer
+    cursorTimer = setTimeout(hideCursor, 3000);
+
+    return () => {
+      window.removeEventListener('mousemove', showCursor);
+      window.removeEventListener('click', showCursor);
+      window.removeEventListener('touchstart', showCursor);
+      clearTimeout(cursorTimer);
+      document.body.style.cursor = 'default';
+    };
+  }, []);
+
+
   // --- Speech Synthesis Logic ---
   useEffect(() => {
-    if (!speech.enabled || !config.currentPatient.id) return;
+    if (!speech?.enabled || !config.currentPatient.id) return;
 
     const p = config.currentPatient;
     const last = lastCalledRef.current;
@@ -117,9 +145,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     if ('speechSynthesis' in window) {
       // Note: Browsers automatically queue calls to speak()
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.volume = speech.volume; // 0 to 1
-      utterance.rate = speech.rate;   // 0.1 to 10
-      utterance.pitch = speech.pitch; // 0 to 2
+      // Ensure speech object properties are accessed safely
+      utterance.volume = speech?.volume || 1; 
+      utterance.rate = speech?.rate || 1;
+      utterance.pitch = speech?.pitch || 1;
       utterance.lang = 'zh-CN';
       
       window.speechSynthesis.speak(utterance);
@@ -130,7 +159,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   // --- Unregistered State Overlay ---
   if (system && !system.isRegistered) {
     return (
-      <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white p-8 space-y-8">
+      <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white p-8 space-y-8 select-none">
         <div className="w-24 h-24 rounded-full bg-red-600 flex items-center justify-center animate-pulse">
            <WifiOff size={48} />
         </div>
@@ -423,12 +452,21 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
   return (
     <div 
-      className="w-full h-full flex flex-col relative overflow-hidden"
-      style={{ backgroundColor: '#e5e7eb' }}
+      className="w-full h-full flex flex-col relative overflow-hidden select-none"
+      style={{ 
+        backgroundColor: '#e5e7eb',
+        padding: layout.overscanPadding || 0
+      }}
     >
       {/* --- Hot Reload & Polling Status Indicator --- */}
       {config.configVersion && (
-        <div className="absolute top-0 left-0 p-1 z-50 pointer-events-none flex flex-col gap-1">
+        <div 
+          className="absolute top-0 left-0 p-1 z-50 pointer-events-none flex flex-col gap-1"
+          style={{ 
+            top: (layout.overscanPadding || 0) + 4, 
+            left: (layout.overscanPadding || 0) + 4 
+          }}
+        >
            {/* Version Badge */}
            <div className="opacity-20 hover:opacity-100 transition-opacity">
                <span className="text-[10px] bg-black text-white px-1 rounded flex items-center gap-1">
@@ -446,13 +484,6 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                </span>
              </div>
            )}
-           
-           {/* Debug Active State (Optional, typically hidden or transient) */}
-           {/* {pollingStatus === 'active' && (
-              <span className="text-[10px] bg-green-500 text-white px-1 rounded flex items-center gap-1 w-fit opacity-20">
-                <RefreshCw size={8} className="animate-spin" /> DB Sync
-              </span>
-           )} */}
         </div>
       )}
 
@@ -535,7 +566,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.topLeft.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomLeft.type === 'hidden' ? '1' : `${layout.leftSplitRatio} 1 0%` 
+                  flex: layout.bottomLeft.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%` 
                 }}
               >
                 {renderZoneContent(layout.topLeft)}
@@ -546,7 +577,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.bottomLeft.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topLeft.type === 'hidden' ? '1' : `${100 - layout.leftSplitRatio} 1 0%` 
+                   flex: layout.topLeft.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%` 
                  }}
               >
                 {renderZoneContent(layout.bottomLeft)}
@@ -571,7 +602,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
              {layout.topRight.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomRight.type === 'hidden' ? '1' : `${layout.rightSplitRatio} 1 0%` 
+                  flex: layout.bottomRight.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%` 
                 }}
               >
                 {renderZoneContent(layout.topRight)}
@@ -582,7 +613,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.bottomRight.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topRight.type === 'hidden' ? '1' : `${100 - layout.rightSplitRatio} 1 0%` 
+                   flex: layout.topRight.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%` 
                  }}
               >
                 {renderZoneContent(layout.bottomRight)}

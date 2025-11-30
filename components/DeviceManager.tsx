@@ -1,17 +1,31 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DeviceBinding, Preset } from '../types';
-import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi } from 'lucide-react';
+import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi, CloudLightning, CloudOff } from 'lucide-react';
+import api from '../services/api';
 
 interface DeviceManagerProps {
   devices: DeviceBinding[];
   presets: Preset[];
   onUpdateDevices: (devices: DeviceBinding[]) => void;
+  isConnected?: boolean;
 }
 
-const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdateDevices }) => {
+const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdateDevices, isConnected }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<DeviceBinding | null>(null);
+
+  // Fetch from API if connected
+  useEffect(() => {
+    if (isConnected) {
+        api.admin.getDevices().then(apiDevices => {
+            onUpdateDevices(apiDevices);
+        }).catch(err => {
+            if (err.message && err.message.includes('Failed to fetch')) return;
+            console.error("Failed to fetch devices", err);
+        });
+    }
+  }, [isConnected]);
 
   const handleAddNew = () => {
     const newDevice: DeviceBinding = {
@@ -34,9 +48,24 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     setEditingId(device.id);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editForm) return;
+
+    if (isConnected) {
+        try {
+            await api.admin.saveDevice(editForm);
+            const apiDevices = await api.admin.getDevices();
+            onUpdateDevices(apiDevices);
+            setEditingId(null);
+            setEditForm(null);
+        } catch (e) {
+            alert('保存失败: API 错误');
+            console.error(e);
+        }
+        return;
+    }
     
+    // Local Fallback
     const exists = devices.find(d => d.id === editForm.id);
     let newDevices;
     if (exists) {
@@ -50,8 +79,21 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     setEditForm(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('确定删除此设备配置吗?')) {
+      if (isConnected) {
+          try {
+              await api.admin.deleteDevice(id);
+              const apiDevices = await api.admin.getDevices();
+              onUpdateDevices(apiDevices);
+          } catch(e) {
+              alert("删除失败");
+              console.error(e);
+          }
+          return;
+      }
+      
+      // Local Fallback
       onUpdateDevices(devices.filter(d => d.id !== id));
     }
   };
@@ -73,7 +115,18 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             <Monitor className="text-blue-600" />
             终端窗口管理
           </h2>
-          <p className="text-gray-500 mt-1">配置电视终端(Android)的 IP/MAC 绑定及对应的显示预案。</p>
+          <div className="flex items-center gap-2 mt-1">
+             <p className="text-gray-500">配置电视终端(Android)的 IP/MAC 绑定及对应的显示预案。</p>
+             {isConnected ? (
+                <span className="flex items-center gap-1 text-[10px] bg-green-100 text-green-700 px-2 rounded-full border border-green-200">
+                    <CloudLightning size={10} /> API Connected
+                </span>
+             ) : (
+                <span className="flex items-center gap-1 text-[10px] bg-gray-100 text-gray-500 px-2 rounded-full border border-gray-200">
+                    <CloudOff size={10} /> Local Mode
+                </span>
+             )}
+          </div>
         </div>
         <button 
           onClick={handleAddNew}
@@ -130,7 +183,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                     </td>
                     <td className="px-6 py-4">
                       <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-medium">
-                        {presets.find(p => p.id === device.linkedPresetId)?.name || '未知预案'}
+                        {presets.find(p => p.id === device.linkedPresetId)?.name || device.linkedPresetId || '未知预案'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">

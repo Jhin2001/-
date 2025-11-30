@@ -1,0 +1,159 @@
+{
+  "id": "default",
+  "name": "默认样式 (Standard Purple)",
+  "timestamp": 1716200000000,
+  "config": {
+    "configVersion": "v1.0.0",
+    "windowNumber": "2",
+    "windowName": "麻精专窗",
+    "windowNumberSize": 80,
+    "windowNameSize": 32,
+    "showQueueNumber": true,
+    "queueNumberStyle": "rounded",
+    "passedDisplayMode": "zone",
+    "grayOutPassed": true,
+    "cardRounded": 12,
+    "currentPatient": {
+      "id": "c1",
+      "name": "张三",
+      "number": "A001",
+      "windowNumber": "2",
+      "windowName": "麻精专窗",
+      "callTimestamp": 1716200000000,
+      "checkInTime": 1716199700000
+    },
+    "waitingList": [
+      {
+        "id": "w1",
+        "name": "孙悟空",
+        "number": "A109",
+        "windowNumber": "1",
+        "windowName": "普通窗口",
+        "checkInTime": 1716198800000
+      },
+      {
+        "id": "w2",
+        "name": "猪八戒",
+        "number": "A110",
+        "windowNumber": "1",
+        "windowName": "普通窗口",
+        "checkInTime": 1716198850000
+      }
+    ],
+    "passedList": [
+      {
+        "id": "p1",
+        "name": "李四",
+        "number": "A000",
+        "windowNumber": "1",
+        "windowName": "普通窗口",
+        "checkInTime": 1716195000000
+      }
+    ],
+    "theme": {
+      "primary": "#7c3aed",
+      "secondary": "#db2777",
+      "textOnPrimary": "#ffffff",
+      "background": "#f3f4f6"
+    },
+    "header": {
+      "show": true,
+      "height": 80,
+      "logoType": "default",
+      "logoUrl": "",
+      "hospitalName": "南部市中心医院",
+      "hospitalNameSize": 28,
+      "centerTitle": "药房取药叫号",
+      "centerTitleSize": 20,
+      "showCenterTitle": true,
+      "rightContentType": "time",
+      "rightTextContent": "请保持安静",
+      "timeFormat": "HH:mm:ss"
+    },
+    "layout": {
+      "orientation": "landscape",
+      "gap": 16,
+      "containerPadding": 16,
+      "overscanPadding": 0,
+      "splitRatio": 40,
+      "leftSplitRatio": 50,
+      "rightSplitRatio": 50,
+      "footerShow": true,
+      "footerText": "<span style=\"color: #fbbf24; font-weight: bold;\">温馨提示：</span>取药时请核对药品名称、规格、数量，离柜概不负责。祝您早日康复！",
+      "footerHeight": 40,
+      "footerScroll": true,
+      "footerSpeed": 20,
+      "topLeft": {
+        "type": "window-info",
+        "showWindowNumber": true,
+        "windowNumberFontSize": 80,
+        "windowNameFontSize": 32,
+        "windowSubTitleHtml": "<div style=\"opacity:0.9;\">请排队 取号</div>"
+      },
+      "bottomLeft": {
+        "type": "current-call",
+        "showCurrentTitle": true,
+        "currentTitleText": "正在取药",
+        "currentTitleFontSize": 24,
+        "currentNameFontSize": 60,
+        "currentNumberFontSize": 36
+      },
+      "topRight": {
+        "type": "waiting-list",
+        "title": "等待取药",
+        "titleColor": "#ffffff",
+        "titleFontSize": 18,
+        "gridColumns": 2,
+        "gridRows": 4,
+        "contentFontSize": 24,
+        "includeCurrent": false,
+        "highlightCurrent": true
+      },
+      "bottomRight": {
+        "type": "passed-list",
+        "title": "过号患者",
+        "titleColor": "#ffffff",
+        "titleFontSize": 18,
+        "gridColumns": 2,
+        "gridRows": 3,
+        "contentFontSize": 20
+      }
+    },
+    "system": {
+      "apiBaseUrl": "https://api.hospital.com/v1",
+      "deviceMac": "00:00:00:00:00:00",
+      "deviceIp": "127.0.0.1",
+      "deviceId": "WIN-01",
+      "isRegistered": true
+    },
+    "dataSource": {
+      "mode": "push",
+      "pollingStrategy": "realtime",
+      "pollingInterval": 5,
+      "dbType": "sqlserver",
+      "dbConnectionString": "",
+      "tableName": "VIEW_PHARMACY_QUEUE",
+      "fieldMap": {
+        "id": "patient_id",
+        "name": "patient_name",
+        "number": "queue_no",
+        "status": "queue_status",
+        "windowId": "window_id",
+        "order": "checkin_time"
+      },
+      "statusMap": {
+        "waitingValue": "0",
+        "calledValue": "1",
+        "passedValue": "2"
+      }
+    },
+    "speech": {
+      "enabled": true,
+      "broadcastMode": "all",
+      "template": "请 {number}号 {name} 到 {window} 取药",
+      "volume": 1,
+      "rate": 1,
+      "pitch": 1
+    }
+  }
+}

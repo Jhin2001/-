@@ -1,0 +1,23 @@
+{
+	"pages": [
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationBarTitleText": "Pharmacy Display",
+				"navigationStyle": "custom",
+				"app-plus": {
+					"titleNView": false,
+					"animationType": "fade-in",
+					"background": "#000000"
+				}
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "Pharmacy Queue",
+		"navigationBarBackgroundColor": "#000000",
+		"backgroundColor": "#000000",
+		"pageOrientation": "landscape"
+	}
+}

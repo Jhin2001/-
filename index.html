@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Pharmacy Queue System</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -11,6 +10,8 @@
       body {
         font-family: 'Inter', sans-serif;
         background-color: #f3f4f6;
+        /* Prevent highlight color on mobile/touch devices */
+        -webkit-tap-highlight-color: transparent;
       }
       /* Custom Scrollbar for the config panel */
       ::-webkit-scrollbar {
