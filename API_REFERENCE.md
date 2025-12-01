@@ -2,7 +2,7 @@
 
 # 药房排队叫号系统 (Pharmacy Queue System) - 后端 API 接口文档
 
-**版本**: v1.0.3  
+**版本**: v1.0.4  
 **日期**: 2025-05-20  
 **适用端**: Android TV (UniApp), Web 管理后台, 呼叫器终端
 
@@ -87,6 +87,7 @@
 
 ### 3.1 获取设备启动配置 (Bootstrap)
 终端开机时调用。后端需根据 `deviceId` 查找绑定的预案 (Preset) 和窗口信息，并将它们合并返回。
+如果设备处于静态展示模式（Static Mode），此接口也会被用于轮询配置更新。
 
 *   **Method**: `GET`
 *   **Path**: `/device/{deviceId}/config`
@@ -133,7 +134,6 @@
     *   `window`: (Query, Optional) 窗口号过滤。
         *   若传值 (e.g., `?window=1`)，只返回该窗口的队列数据（分诊屏模式）。
         *   若不传，返回所有窗口数据（综合大屏模式）。
-    *   `deviceId`: (Query, Optional) 设备ID，用于后端判断该设备是走直连数据库(Pull)还是本地推送(Push)。
 *   **Response**:
     ```json
     {
@@ -186,17 +186,37 @@
 *   **逻辑说明**:
     1.  修改该患者的 `CheckInTime` 为 `Min(CheckInTime) - 1秒`，使其排到队首。
 
-### 4.6 删除/完成 (Delete)
+### 4.6 删除 (Delete)
 *   **Method**: `POST`
 *   **Path**: `/queue/delete`
 *   **Body**: `{ "patientId": "123" }`
 *   **逻辑说明**: 软删除或硬删除该记录。
+
+### 4.7 复位/重排 (Restore)
+*   **Method**: `POST`
+*   **Path**: `/queue/restore`
+*   **Body**: `{ "patientId": "123" }`
+*   **逻辑说明**:
+    1.  将已过号(Passed)的患者状态恢复为等待(Waiting)。
+    2.  通常将其排到等待队列的末尾（更新 `CheckInTime` 为当前时间）或保持原时间，视医院规则而定。
 
 ---
 
 ## 5. 管理后台接口 (Admin API)
 
 **调用方**: Web 配置面板 (ConfigPanel)
+
+### 5.0 管理员登录
+*   **Method**: `POST`
+*   **Path**: `/admin/login`
+*   **Body**: `{ "password": "..." }`
+*   **Response**:
+    ```json
+    {
+      "code": 200,
+      "data": { "token": "jwt_token...", "user": { "username": "admin" } }
+    }
+    ```
 
 ### 5.1 获取所有设备
 *   **Method**: `GET`

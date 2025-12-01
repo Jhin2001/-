@@ -767,22 +767,89 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
 
                 {activeTab === 'theme' && (
                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3">
-                         {Object.entries(PRESET_THEMES).map(([key, theme]) => (
-                            <button 
-                              key={key}
-                              onClick={() => updateConfig({...config, theme: theme})}
-                              className={`p-2 border rounded-lg flex items-center gap-2 ${
-                                 JSON.stringify(config.theme) === JSON.stringify(theme) ? 'ring-2 ring-blue-500 bg-blue-50' : 'bg-white'
-                              }`}
-                            >
-                               <div className="w-6 h-6 rounded-full" style={{ background: theme.primary }}></div>
-                               <span className="capitalize text-xs font-bold">{key}</span>
-                            </button>
-                         ))}
-                      </div>
+                      {/* Presets */}
                       <div>
-                         <label className="block text-xs text-gray-500 mb-1">卡片圆角 ({config.cardRounded}px)</label>
+                        <label className="block text-xs font-bold text-gray-500 mb-2">预设主题 (Presets)</label>
+                        <div className="grid grid-cols-2 gap-3">
+                           {Object.entries(PRESET_THEMES).map(([key, theme]) => (
+                              <button 
+                                key={key}
+                                onClick={() => updateConfig({...config, theme: {...theme}})}
+                                className={`p-2 border rounded-lg flex items-center gap-2 ${
+                                   JSON.stringify(config.theme) === JSON.stringify(theme) ? 'ring-2 ring-blue-500 bg-blue-50' : 'bg-white'
+                                }`}
+                              >
+                                 <div className="w-6 h-6 rounded-full shadow-sm border border-gray-100" style={{ background: theme.primary }}></div>
+                                 <span className="capitalize text-xs font-bold">{key}</span>
+                              </button>
+                           ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t border-dashed my-2"></div>
+
+                      {/* Custom Colors */}
+                      <div>
+                         <label className="block text-xs font-bold text-gray-500 mb-2">自定义颜色 (Custom Colors)</label>
+                         <div className="bg-white p-3 rounded-lg border border-gray-200 space-y-3">
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.primary} 
+                                  onChange={(e) => handleUpdate(['theme', 'primary'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">主色调 (Primary)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.primary}</div>
+                               </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.secondary} 
+                                  onChange={(e) => handleUpdate(['theme', 'secondary'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">次色调 (Secondary)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.secondary}</div>
+                               </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.background} 
+                                  onChange={(e) => handleUpdate(['theme', 'background'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">背景色 (Background)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.background}</div>
+                               </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.textOnPrimary} 
+                                  onChange={(e) => handleUpdate(['theme', 'textOnPrimary'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">主色文字 (Text On Primary)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.textOnPrimary}</div>
+                               </div>
+                            </div>
+                         </div>
+                      </div>
+
+                      <div className="border-t border-dashed my-2"></div>
+
+                      <div>
+                         <label className="block text-xs font-bold text-gray-500 mb-1">卡片圆角 ({config.cardRounded}px)</label>
                          <input 
                            type="range" min="0" max="30" 
                            value={config.cardRounded} 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
 import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
@@ -461,7 +462,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     <div 
       className="w-full h-full flex flex-col relative overflow-hidden select-none"
       style={{ 
-        backgroundColor: '#e5e7eb',
+        backgroundColor: theme.background || '#e5e7eb',
         padding: layout.overscanPadding || 0
       }}
     >

@@ -1,15 +1,25 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import DisplayScreen from './components/DisplayScreen';
 import LoginPage from './components/LoginPage';
 import DeviceManager from './components/DeviceManager';
 import SystemSettings from './components/SystemSettings';
 import PatientQuery from './components/PatientQuery';
 import ConfigPanel from './components/ConfigPanel';
-import { QueueConfig, DeviceBinding, Preset, GlobalSystemSettings, Patient } from './types';
+import { QueueConfig, DeviceBinding, Preset, GlobalSystemSettings, Patient, ZoneConfig } from './types';
 import { DEFAULT_CONFIG, DEFAULT_GLOBAL_SETTINGS, DEFAULT_DEVICES } from './constants';
 import api from './services/api';
 import { Layout, Menu, Activity, Settings, Monitor, Search } from 'lucide-react';
+
+// Helper to check if the current configuration is purely static
+const isConfigStatic = (layout: QueueConfig['layout']): boolean => {
+  const zones: ZoneConfig[] = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
+  const dynamicTypes = ['waiting-list', 'current-call', 'window-info', 'passed-list'];
+  
+  // If any visible zone is a dynamic type, it's not static
+  const hasDynamic = zones.some(z => z.type !== 'hidden' && dynamicTypes.includes(z.type));
+  return !hasDynamic;
+};
 
 const App: React.FC = () => {
   const [config, setConfig] = useState<QueueConfig>(DEFAULT_CONFIG);
@@ -25,6 +35,9 @@ const App: React.FC = () => {
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<'design'|'devices'|'settings'|'query'>('design');
+
+  // Keep track of previous config version to detect remote changes
+  const prevConfigIdRef = useRef<string>('');
 
   // Helper for TV Mode Fallback
   const initTvModeLocalFallback = (
@@ -151,40 +164,82 @@ const App: React.FC = () => {
 
     const pollData = async () => {
       try {
-        // 1. Health Check for Connection Status
-        // Only perform health check if we think we are offline to try reconnecting
+        // 1. Connection Check (Optional optimization: skip if recently checked)
         if (!isConnected) {
              try {
                 await api.system.health();
                 setIsConnected(true);
              } catch(e) {
-                // If health check fails, we are definitely offline
                 setIsConnected(false);
-                return; 
+                return; // Stop processing if offline
              }
         }
 
-        // 2. Fetch Business Data
-        const windowFilter = config.speech?.broadcastMode === 'local' ? config.windowNumber : undefined;
-        // Use the queue snapshot API
-        const snapshot = await api.queue.getSnapshot(windowFilter);
-        
-        setIsConnected(true); // Confirmation of connection
+        // --- SMART POLLING STRATEGY ---
+        const isStatic = isConfigStatic(config.layout);
+        const deviceId = config.system.deviceId;
 
-        // Version Check
-        if (snapshot.version !== dataVersion) {
-            setConfig(prev => ({
-               ...prev,
-               currentPatient: snapshot.currentPatient || { id: '', name: '', number: '' } as Patient,
-               waitingList: snapshot.waitingList || [],
-               passedList: snapshot.passedList || [],
-            }));
-            setDataVersion(snapshot.version);
+        if (isStatic && isTvMode && deviceId && deviceId !== 'Unknown') {
+            // STRATEGY A: Static Content -> Poll Config Only (Lightweight)
+            // We check if the server has a new configuration for us.
+            try {
+                const remoteConfig = await api.device.getConfig(deviceId);
+                
+                // Simple check: Has the config version changed? or simply deeper comparison
+                // Here we assume remoteConfig always returns full object.
+                // In a real app, you might compare a version hash.
+                
+                // For this demo, we can just check if the layout type changed from static to dynamic
+                // or compare a timestamp if available.
+                // Let's brute-force update if we suspect change, or rely on a version ID.
+                
+                // If the new config is NOT static, we update local state.
+                // This triggers a re-render, and the next poll loop will enter Strategy B.
+                if (!isConfigStatic(remoteConfig.layout)) {
+                     console.log("[SmartPoll] Detected layout change to Dynamic. Switching mode.");
+                     setConfig(prev => ({
+                         ...remoteConfig,
+                         system: { ...prev.system, ...remoteConfig.system } // Preserve local system ID
+                     }));
+                } else {
+                    // It is still static, but maybe the text content changed?
+                    // We can do a stringify compare or check a version field
+                    if (JSON.stringify(remoteConfig.layout) !== JSON.stringify(config.layout)) {
+                        console.log("[SmartPoll] Static content updated.");
+                        setConfig(prev => ({
+                            ...remoteConfig,
+                            system: { ...prev.system, ...remoteConfig.system }
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.warn("[SmartPoll] Failed to check config update", e);
+            }
+
+        } else {
+            // STRATEGY B: Dynamic Content -> Poll Queue Data (Heavy)
+            // 2. Fetch Business Data
+            const windowFilter = config.speech?.broadcastMode === 'local' ? config.windowNumber : undefined;
+            const snapshot = await api.queue.getSnapshot(windowFilter);
+            
+            setIsConnected(true); 
+
+            // Data Version Check
+            if (snapshot.version !== dataVersion) {
+                setConfig(prev => ({
+                   ...prev,
+                   currentPatient: snapshot.currentPatient || { id: '', name: '', number: '' } as Patient,
+                   waitingList: snapshot.waitingList || [],
+                   passedList: snapshot.passedList || [],
+                }));
+                setDataVersion(snapshot.version);
+            }
+
+            // Optional: If getSnapshot returned a special "configChanged" flag, we could also fetch config here.
         }
+
       } catch (err) {
          console.warn("Polling failed", err);
-         // Only mark offline if it's a network error, not a business error (like 400)
-         // But for simplicity, we treat fetch errors as offline
          if ((err as Error).message?.includes('Failed to fetch')) {
              setIsConnected(false);
          }
@@ -195,16 +250,18 @@ const App: React.FC = () => {
     pollData();
 
     // Schedule
-    const timer = setInterval(pollData, intervalSeconds * 1000);
+    // If static, we can poll slower to save resources (e.g. 10s), otherwise use config interval
+    const effectiveInterval = isConfigStatic(config.layout) ? 10 : intervalSeconds;
+    const timer = setInterval(pollData, effectiveInterval * 1000);
+    
     return () => clearInterval(timer);
-  }, [isTvMode, isLoggedIn, config.dataSource?.pollingInterval, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected]);
+  }, [isTvMode, isLoggedIn, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system.deviceId]);
 
   // --- Sync System Settings from API when Connected ---
   useEffect(() => {
       if (isConnected) {
           api.admin.getSystemSettings()
              .then(remoteSettings => {
-                 // Merge remote settings but keep local apiBaseUrl (as it defines the connection)
                  setGlobalSettings(prev => ({
                      ...remoteSettings,
                      apiBaseUrl: prev.apiBaseUrl 

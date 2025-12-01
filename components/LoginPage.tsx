@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
 import { LogIn, User, Lock, Activity } from 'lucide-react';
+import api from '../services/api';
 
 interface LoginPageProps {
   settings: GlobalSystemSettings;
@@ -14,17 +15,29 @@ const LoginPage: React.FC<LoginPageProps> = ({ settings, onLogin }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
-      if (username === 'admin' && password === settings.adminPassword) {
+    setError('');
+
+    try {
+        // 1. Try API Login first
+        await api.admin.login(password);
+        // If API call succeeds (no error thrown), we log in
         onLogin(true);
-      } else {
-        setError('用户名或密码错误');
-        setIsLoading(false);
-      }
-    }, 800); // Fake delay for UX
+    } catch (err) {
+        // 2. Fallback to Local Check (Offline Mode)
+        console.warn("API Login failed, attempting local fallback:", err);
+        
+        // Wait a brief moment to prevent brute-force timing attacks (optional, mostly for UX here)
+        // Check against the settings prop (which defaults to '123456' if not synced)
+        if (username === 'admin' && password === settings.adminPassword) {
+            onLogin(true);
+        } else {
+            setError('用户名或密码错误');
+            setIsLoading(false);
+        }
+    }
   };
 
   return (
