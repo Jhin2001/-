@@ -1,9 +1,8 @@
 
 
-
 # 药房排队叫号系统 (Pharmacy Queue System) - 后端 API 接口文档
 
-**版本**: v1.0.2  
+**版本**: v1.0.3  
 **日期**: 2025-05-20  
 **适用端**: Android TV (UniApp), Web 管理后台, 呼叫器终端
 
@@ -31,8 +30,9 @@
 }
 ```
 
-### 1.4 时间格式
-*   所有时间字段 (如 `timestamp`, `checkInTime`) 建议统一使用 **Unix 时间戳 (毫秒/Long)**，例如 `1678886655000`。这能避免时区转换问题。
+### 1.4 时间格式 (Time Format)
+*   **重要**: 所有时间字段 (如 `lastSeen`, `checkInTime`) 统一使用 **标准日期时间字符串**，格式为 `yyyy-MM-dd HH:mm:ss.fff`。
+*   示例: `"2025-11-30 14:30:05.123"`
 
 ---
 
@@ -47,8 +47,8 @@
   "status": 0,                // 0=等待(Waiting), 1=正在叫号(Calling), 2=已过号(Passed), 9=完成(Done)
   "windowNumber": "1",        // 分配的窗口号
   "windowName": "西药房",      // 窗口名称
-  "checkInTime": 1700000000000, // 报到时间
-  "callTime": 1700000100000     // 最近一次叫号时间
+  "checkInTime": "2025-11-30 08:30:00.000", // 报到时间
+  "callTime": "2025-11-30 09:15:22.123"     // 最近一次叫号时间
 }
 ```
 
@@ -62,7 +62,7 @@
   "assignedWindowNumber": "1", // 绑定的窗口号 (用于过滤语音和数据)
   "linkedPresetId": "preset_1",// 绑定的 UI 样式预案 ID
   "status": "online",          // online, offline
-  "lastSeen": 1700000000000
+  "lastSeen": "2025-11-30 14:00:00.000"
 }
 ```
 
@@ -109,6 +109,7 @@
     {
       "deviceId": "TV-001",
       "status": "online",
+      "timestamp": "2025-11-30 14:00:00.000",
       "details": {
          "appVersion": "1.0.2",
          "ip": "192.168.1.55"
@@ -183,7 +184,7 @@
 *   **Path**: `/queue/top`
 *   **Body**: `{ "patientId": "123" }`
 *   **逻辑说明**:
-    1.  修改该患者的 `CheckInTime` 为 `Min(CheckInTime) - 1ms`，使其排到队首。
+    1.  修改该患者的 `CheckInTime` 为 `Min(CheckInTime) - 1秒`，使其排到队首。
 
 ### 4.6 删除/完成 (Delete)
 *   **Method**: `POST`
@@ -204,7 +205,14 @@
     ```json
     {
       "code": 200,
-      "data": [ { ...DeviceBinding... }, ... ]
+      "data": [ 
+          { 
+              "id": "TV-01", 
+              "name": "设备1", 
+              "lastSeen": "2025-11-30 14:00:00.000",
+              "status": "online"
+          } 
+      ]
     }
     ```
 
@@ -239,7 +247,8 @@
     {
       "id": "preset_new",
       "name": "春节限定皮肤",
-      "config": { ...FrontEnd QueueConfig JSON... }
+      "config": "{ ...Escaped JSON String... }" 
+      // 注意: 后端可能要求 config 字段是 JSON 字符串而不是对象
     }
     ```
 
@@ -258,3 +267,28 @@
 *   **Path**: `/admin/preset/{id}`
 *   **Response**: `{ "code": 200 }`
 *   **逻辑说明**: 根据 ID 从数据库中物理删除该预案配置。
+
+---
+
+## 6. 系统基础接口 (System API)
+
+**调用方**: 所有终端, 管理后台
+
+### 6.1 服务健康检查 (Health Check)
+用于前端检测后端服务是否在线，以及测试网络连接通断。此接口不应包含任何业务逻辑验证。
+
+*   **Method**: `GET`
+*   **Path**: `/system/health`
+*   **Auth**: 无需鉴权
+*   **Response**:
+    ```json
+    {
+      "code": 200,
+      "message": "success",
+      "data": {
+         "status": "online",
+         "serverTime": "2025-05-20 12:00:00.000", // 服务器当前时间
+         "version": "1.0.0" // 后端版本号
+      }
+    }
+    ```

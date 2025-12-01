@@ -1,8 +1,10 @@
 
 
+
 import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
 import { Settings, Image, Key, Type, Database, Save, Check, Link, Activity, ExternalLink, AlertTriangle, CloudLightning, CloudOff } from 'lucide-react';
+import api from '../services/api';
 
 interface SystemSettingsProps {
   settings: GlobalSystemSettings;
@@ -37,8 +39,10 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
     
     // Ensure URL has no trailing slash for the test
     const baseUrl = (settings.apiBaseUrl || '').replace(/\/+$/, '');
-    // Try a simple endpoint. Since /queue/snapshot needs parameters usually, it might return data or 400, both mean connection is OK.
-    const testUrl = `${baseUrl}/queue/snapshot`;
+    
+    // FIX: Use dedicated health check endpoint instead of business endpoint
+    // This avoids 400 Bad Request errors when checking connection if params are missing
+    const testUrl = `${baseUrl}/system/health`;
 
     try {
       const controller = new AbortController();
@@ -52,8 +56,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
       
       clearTimeout(timeoutId);
 
-      if (res.ok || res.status === 400) {
-         // 200 OK or 400 Bad Request (missing params) both mean the server is reachable
+      if (res.ok) {
          setTestStatus('success');
          setTestMsg('连接成功！API 服务正常。');
       } else {
@@ -75,7 +78,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
 
   const openApiInNewTab = () => {
       const baseUrl = (settings.apiBaseUrl || '').replace(/\/+$/, '');
-      window.open(`${baseUrl}/queue/snapshot`, '_blank');
+      window.open(`${baseUrl}/system/health`, '_blank');
   };
 
   return (

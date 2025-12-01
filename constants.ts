@@ -1,4 +1,5 @@
 
+
 import { QueueConfig, PRESET_THEMES, GlobalSystemSettings, DeviceBinding } from './types';
 
 export const DEFAULT_GLOBAL_SETTINGS: GlobalSystemSettings = {
@@ -21,7 +22,7 @@ export const DEFAULT_DEVICES: DeviceBinding[] = [
     assignedWindowName: '西药发药窗',
     linkedPresetId: 'default',
     status: 'online',
-    lastSeen: Date.now()
+    lastSeen: new Date().toISOString()
   },
   {
     id: 'd2',
@@ -32,7 +33,7 @@ export const DEFAULT_DEVICES: DeviceBinding[] = [
     assignedWindowName: '麻精专窗',
     linkedPresetId: 'default',
     status: 'offline',
-    lastSeen: Date.now() - 3600000
+    lastSeen: new Date(Date.now() - 3600000).toISOString()
   }
 ];
 
@@ -40,19 +41,19 @@ export const DEFAULT_CONFIG: QueueConfig = {
   configVersion: 'v1.0.0', // Init version
 
   // Data
-  currentPatient: { id: 'c1', name: '张三', number: 'A001', windowNumber: '2', windowName: '麻精专窗', callTimestamp: Date.now(), checkInTime: Date.now() - 300000 },
+  currentPatient: { id: 'c1', name: '张三', number: 'A001', windowNumber: '2', windowName: '麻精专窗', callTimestamp: new Date().toISOString(), checkInTime: new Date(Date.now() - 300000).toISOString() },
   waitingList: [
-    { id: 'w1', name: '孙悟空', number: 'A109', checkInTime: Date.now() - 1200000, windowNumber: '1', windowName: '普通窗口' },
-    { id: 'w2', name: '猪八戒', number: 'A110', checkInTime: Date.now() - 1150000, windowNumber: '1', windowName: '普通窗口' },
-    { id: 'w3', name: '沙悟净', number: 'A111', checkInTime: Date.now() - 1100000, windowNumber: '2', windowName: '麻精专窗' },
-    { id: 'w4', name: '唐僧', number: 'A112', checkInTime: Date.now() - 1050000, windowNumber: '2', windowName: '麻精专窗' },
-    { id: 'w5', name: '白龙马', number: 'A113', checkInTime: Date.now() - 1000000, windowNumber: '1', windowName: '普通窗口' },
-    { id: 'w6', name: '红孩儿', number: 'A114', checkInTime: Date.now() - 950000, windowNumber: '3', windowName: '咨询窗口' },
+    { id: 'w1', name: '孙悟空', number: 'A109', checkInTime: new Date(Date.now() - 1200000).toISOString(), windowNumber: '1', windowName: '普通窗口' },
+    { id: 'w2', name: '猪八戒', number: 'A110', checkInTime: new Date(Date.now() - 1150000).toISOString(), windowNumber: '1', windowName: '普通窗口' },
+    { id: 'w3', name: '沙悟净', number: 'A111', checkInTime: new Date(Date.now() - 1100000).toISOString(), windowNumber: '2', windowName: '麻精专窗' },
+    { id: 'w4', name: '唐僧', number: 'A112', checkInTime: new Date(Date.now() - 1050000).toISOString(), windowNumber: '2', windowName: '麻精专窗' },
+    { id: 'w5', name: '白龙马', number: 'A113', checkInTime: new Date(Date.now() - 1000000).toISOString(), windowNumber: '1', windowName: '普通窗口' },
+    { id: 'w6', name: '红孩儿', number: 'A114', checkInTime: new Date(Date.now() - 950000).toISOString(), windowNumber: '3', windowName: '咨询窗口' },
   ],
   passedList: [
-    { id: 'p1', name: '丁一', number: 'A000', checkInTime: Date.now() - 5000000, windowNumber: '1', windowName: '普通窗口' },
-    { id: 'p2', name: '赵六', number: 'A111', checkInTime: Date.now() - 4800000, windowNumber: '2', windowName: '麻精专窗' },
-    { id: 'p3', name: '钱七', number: 'A112', checkInTime: Date.now() - 4600000, windowNumber: '1', windowName: '普通窗口' },
+    { id: 'p1', name: '丁一', number: 'A000', checkInTime: new Date(Date.now() - 5000000).toISOString(), windowNumber: '1', windowName: '普通窗口' },
+    { id: 'p2', name: '赵六', number: 'A111', checkInTime: new Date(Date.now() - 4800000).toISOString(), windowNumber: '2', windowName: '麻精专窗' },
+    { id: 'p3', name: '钱七', number: 'A112', checkInTime: new Date(Date.now() - 4600000).toISOString(), windowNumber: '1', windowName: '普通窗口' },
   ],
 
   // Specific Element Configs (Global Fallbacks)
@@ -142,10 +143,10 @@ export const DEFAULT_CONFIG: QueueConfig = {
   // System
   system: {
     apiBaseUrl: 'https://api.hospital.com/v1',
-    deviceId: 'WIN-02',
-    deviceMac: '00:1B:44:11:3A:B7',
-    deviceIp: '192.168.1.102',
-    isRegistered: true // Simulates a registered device
+    deviceId: 'Unknown',
+    deviceMac: '00:00:00:00:00:00',
+    deviceIp: '0.0.0.0',
+    isRegistered: false // FIXED: Default to false so new devices show registration screen
   },
 
   // Data Source

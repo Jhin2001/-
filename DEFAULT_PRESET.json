@@ -1,7 +1,9 @@
+
+
 {
   "id": "default",
   "name": "默认样式 (Standard Purple)",
-  "timestamp": 1716200000000,
+  "timestamp": "2025-05-20 10:00:00.000",
   "config": {
     "configVersion": "v1.0.0",
     "windowNumber": "2",
@@ -19,8 +21,8 @@
       "number": "A001",
       "windowNumber": "2",
       "windowName": "麻精专窗",
-      "callTimestamp": 1716200000000,
-      "checkInTime": 1716199700000
+      "callTimestamp": "2025-05-20 10:00:00.000",
+      "checkInTime": "2025-05-20 09:30:00.000"
     },
     "waitingList": [
       {
@@ -29,7 +31,7 @@
         "number": "A109",
         "windowNumber": "1",
         "windowName": "普通窗口",
-        "checkInTime": 1716198800000
+        "checkInTime": "2025-05-20 09:40:00.000"
       },
       {
         "id": "w2",
@@ -37,7 +39,7 @@
         "number": "A110",
         "windowNumber": "1",
         "windowName": "普通窗口",
-        "checkInTime": 1716198850000
+        "checkInTime": "2025-05-20 09:41:00.000"
       }
     ],
     "passedList": [
@@ -47,7 +49,7 @@
         "number": "A000",
         "windowNumber": "1",
         "windowName": "普通窗口",
-        "checkInTime": 1716195000000
+        "checkInTime": "2025-05-20 09:00:00.000"
       }
     ],
     "theme": {

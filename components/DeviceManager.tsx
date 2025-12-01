@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { DeviceBinding, Preset } from '../types';
-import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi, CloudLightning, CloudOff } from 'lucide-react';
+import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi, CloudLightning, CloudOff, Server, ExternalLink } from 'lucide-react';
 import api from '../services/api';
 
 interface DeviceManagerProps {
@@ -14,18 +13,64 @@ interface DeviceManagerProps {
 const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdateDevices, isConnected }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<DeviceBinding | null>(null);
+  const [availablePresets, setAvailablePresets] = useState<{id: string, name: string}[]>([]);
 
   // Fetch from API if connected
   useEffect(() => {
     if (isConnected) {
+        // Fetch Devices
         api.admin.getDevices().then(apiDevices => {
             onUpdateDevices(apiDevices);
         }).catch(err => {
             if (err.message && err.message.includes('Failed to fetch')) return;
             console.error("Failed to fetch devices", err);
         });
+
+        // Fetch Presets for Dropdown
+        api.admin.getPresets().then(list => {
+            const mapped = list.map((p:any) => ({ id: p.id || p.Id, name: p.name || p.Name }));
+            setAvailablePresets(mapped);
+        }).catch(console.error);
+
+    } else {
+        // Use local props if offline
+        setAvailablePresets(presets);
     }
-  }, [isConnected]);
+  }, [isConnected, presets]);
+
+  // NEW: Quick add Server Monitor
+  const handleAddServerMonitor = async () => {
+      const serverDev: DeviceBinding = {
+          id: 'SERVER_MONITOR',
+          name: '服务端预览监视器',
+          ipAddress: '127.0.0.1',
+          macAddress: '00:00:00:00:00:00',
+          assignedWindowNumber: '1',
+          assignedWindowName: '综合窗口',
+          linkedPresetId: availablePresets[0]?.id || '',
+          status: 'online',
+          lastSeen: new Date().toISOString()
+      };
+
+      if (isConnected) {
+          try {
+              await api.admin.saveDevice(serverDev);
+              const apiDevices = await api.admin.getDevices();
+              onUpdateDevices(apiDevices);
+              alert("服务端监视器已创建");
+          } catch(e) { console.error(e); alert("创建失败"); }
+      } else {
+          // Local
+          const exists = devices.find(d => d.id === serverDev.id);
+          if (!exists) onUpdateDevices([...devices, serverDev]);
+      }
+  };
+
+  // NEW: Launch TV Mode for a specific device
+  const handleLaunch = (deviceId: string) => {
+      const url = `${window.location.origin}/?mode=tv&deviceId=${deviceId}`;
+      window.open(url, '_blank');
+  };
 
   const handleAddNew = () => {
     const newDevice: DeviceBinding = {
@@ -35,9 +80,9 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
       macAddress: '',
       assignedWindowNumber: '1',
       assignedWindowName: '综合窗口',
-      linkedPresetId: presets[0]?.id || '',
+      linkedPresetId: availablePresets[0]?.id || '',
       status: 'unregistered',
-      lastSeen: 0
+      lastSeen: new Date().toISOString()
     };
     setEditForm(newDevice);
     setEditingId(newDevice.id);
@@ -53,7 +98,19 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
 
     if (isConnected) {
         try {
-            await api.admin.saveDevice(editForm);
+            // Fix: Ensure numerical values are converted to strings for backend compatibility
+            // "Cannot get the value of a token type 'Number' as a string"
+            const payload = {
+                ...editForm,
+                // If lastSeen is a number (timestamp), convert to ISO string. If 0, use current time.
+                lastSeen: typeof editForm.lastSeen === 'number' 
+                    ? new Date(editForm.lastSeen || Date.now()).toISOString()
+                    : (editForm.lastSeen || new Date().toISOString()),
+                // Ensure window number is string
+                assignedWindowNumber: String(editForm.assignedWindowNumber || '')
+            };
+
+            await api.admin.saveDevice(payload as any);
             const apiDevices = await api.admin.getDevices();
             onUpdateDevices(apiDevices);
             setEditingId(null);
@@ -128,12 +185,21 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
              )}
           </div>
         </div>
-        <button 
-          onClick={handleAddNew}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm"
-        >
-          <Plus size={18} /> 新增终端
-        </button>
+        <div className="flex gap-2">
+            <button 
+                onClick={handleAddServerMonitor}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center gap-2 shadow-sm"
+                title="创建一个虚拟设备用于在本机预览效果"
+            >
+                <Server size={18} /> 创建服务端监视器
+            </button>
+            <button 
+                onClick={handleAddNew}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm"
+            >
+                <Plus size={18} /> 新增终端
+            </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
@@ -152,7 +218,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             {/* If adding new item that isn't in list yet */}
             {editingId && !devices.find(d => d.id === editingId) && editForm && (
                <tr className="bg-blue-50">
-                 {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), presets)}
+                 {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets)}
                </tr>
             )}
 
@@ -160,10 +226,11 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
               <React.Fragment key={device.id}>
                 {editingId === device.id && editForm ? (
                    <tr className="bg-blue-50">
-                     {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), presets)}
+                     {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets)}
                    </tr>
                 ) : (
-                  <tr className="hover:bg-gray-50 transition-colors">
+                  // ... read mode row ...
+                  <tr className={`hover:bg-gray-50 transition-colors ${device.id === 'SERVER_MONITOR' ? 'bg-purple-50' : ''}`}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <span className={`flex h-2.5 w-2.5 rounded-full ${getStatusConfig(device.status).color}`}></span>
@@ -172,7 +239,10 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                         </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">{device.name}</td>
+                    <td className="px-6 py-4 font-medium text-gray-900">
+                        {device.id === 'SERVER_MONITOR' && <Server size={14} className="inline mr-1 text-purple-600"/>}
+                        {device.name}
+                    </td>
                     <td className="px-6 py-4 text-sm font-mono text-gray-500">
                       <div>{device.ipAddress || '---'}</div>
                       <div className="text-xs text-gray-400">{device.macAddress}</div>
@@ -183,10 +253,21 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                     </td>
                     <td className="px-6 py-4">
                       <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-medium">
-                        {presets.find(p => p.id === device.linkedPresetId)?.name || device.linkedPresetId || '未知预案'}
+                        {availablePresets.find(p => p.id === device.linkedPresetId)?.name || device.linkedPresetId || '未知预案'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right space-x-2">
+                    <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                      {/* NEW: Launch Button */}
+                      <button 
+                        onClick={() => handleLaunch(device.id)}
+                        className="text-green-600 hover:bg-green-50 p-2 rounded flex items-center gap-1 text-xs font-bold border border-transparent hover:border-green-200"
+                        title="在新窗口打开此终端画面"
+                      >
+                        <ExternalLink size={16} /> 启动
+                      </button>
+
+                      <div className="h-4 w-px bg-gray-300 mx-1"></div>
+
                       <button 
                         onClick={() => handleEdit(device)}
                         className="text-blue-600 hover:bg-blue-50 p-2 rounded"
@@ -224,7 +305,7 @@ const renderEditRow = (
   setForm: React.Dispatch<React.SetStateAction<DeviceBinding | null>>,
   onSave: () => void,
   onCancel: () => void,
-  presets: Preset[]
+  presets: {id: string, name: string}[]
 ) => (
   <>
     <td className="px-6 py-4">

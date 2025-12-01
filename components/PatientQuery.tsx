@@ -1,5 +1,3 @@
-
-
 import React, { useState } from 'react';
 import { QueueConfig, Patient } from '../types';
 import { Search, Filter, RotateCcw, ArrowRight, ArrowUp, Trash2, Clock, Monitor } from 'lucide-react';
@@ -75,9 +73,11 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
     }
   };
 
-  const formatTime = (ts?: number) => {
+  const formatTime = (ts?: number | string) => {
     if (!ts) return '-';
-    return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
+    const date = new Date(ts);
+    if (isNaN(date.getTime())) return '-';
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
   };
 
   // --- Operations Logic ---

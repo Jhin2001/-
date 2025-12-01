@@ -100,11 +100,16 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     const p = config.currentPatient;
     const last = lastCalledRef.current;
     
+    // Helper to normalize timestamp to number
+    const currentTs = p.callTimestamp 
+      ? (typeof p.callTimestamp === 'number' ? p.callTimestamp : new Date(p.callTimestamp).getTime()) 
+      : 0;
+
     // Logic:
     // 1. New Call: Different ID from last
     // 2. Recall: Same ID but newer timestamp
     const isNewCall = !last || last.id !== p.id;
-    const isRecall = last && last.id === p.id && (p.callTimestamp || 0) > last.ts;
+    const isRecall = last && last.id === p.id && currentTs > last.ts;
 
     if (isNewCall || isRecall) {
       // Check Broadcast Mode
@@ -116,18 +121,18 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
          if (pWinNum && cWinNum) {
            // If numbers are available, strict match
            if (pWinNum !== cWinNum) {
-              lastCalledRef.current = { id: p.id, ts: p.callTimestamp || 0 };
+              lastCalledRef.current = { id: p.id, ts: currentTs };
               return;
            }
          } else if (p.windowName && p.windowName !== config.windowName) {
            // Fallback: If no number, check Window Name
-           lastCalledRef.current = { id: p.id, ts: p.callTimestamp || 0 };
+           lastCalledRef.current = { id: p.id, ts: currentTs };
            return; 
          }
       }
 
       // Update ref
-      lastCalledRef.current = { id: p.id, ts: p.callTimestamp || 0 };
+      lastCalledRef.current = { id: p.id, ts: currentTs };
       
       // Prepare text
       const windowTarget = p.windowName || config.windowName;
@@ -250,10 +255,12 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                )}
               
               {/* Rich Text Subtitle */}
-              <div 
-                 className="mb-1 text-center"
-                 dangerouslySetInnerHTML={{ __html: zoneConfig.windowSubTitleHtml || '<div class="text-lg opacity-90">请排队 取号</div>' }}
-              />
+              {(zoneConfig.showWindowSubTitle !== false) && (
+                <div 
+                   className="mb-1 text-center"
+                   dangerouslySetInnerHTML={{ __html: zoneConfig.windowSubTitleHtml || '<div class="text-lg opacity-90">请排队 取号</div>' }}
+                />
+              )}
               
               <div className="font-bold text-center" style={{ fontSize: `${zoneConfig.windowNameFontSize || config.windowNameSize}px` }}>
                 {config.windowName}
@@ -566,7 +573,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.topLeft.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomLeft.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%` 
+                  flex: layout.bottomLeft.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%`,
+                  overflow: 'hidden',
+                  minHeight: 0
                 }}
               >
                 {renderZoneContent(layout.topLeft)}
@@ -577,7 +586,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.bottomLeft.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topLeft.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%` 
+                   flex: layout.topLeft.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%`,
+                   overflow: 'hidden',
+                   minHeight: 0
                  }}
               >
                 {renderZoneContent(layout.bottomLeft)}
@@ -602,7 +613,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
              {layout.topRight.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomRight.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%` 
+                  flex: layout.bottomRight.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%`,
+                  overflow: 'hidden',
+                  minHeight: 0
                 }}
               >
                 {renderZoneContent(layout.topRight)}
@@ -613,7 +626,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             {layout.bottomRight.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topRight.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%` 
+                   flex: layout.topRight.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%`,
+                   overflow: 'hidden',
+                   minHeight: 0
                  }}
               >
                 {renderZoneContent(layout.bottomRight)}

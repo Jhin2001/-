@@ -1,6 +1,5 @@
 
 
-
 import { QueueConfig, Patient, GlobalSystemSettings, DeviceBinding } from '../types';
 import { DEFAULT_CONFIG } from '../constants';
 
@@ -48,12 +47,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     },
   };
 
+  // --- DEBUG LOGGING ---
+  console.log(`[API Request] ${config.method || 'GET'} ${url}`, config.body ? '(has body)' : '');
+
   try {
     const response = await fetch(url, config);
 
     // 处理 HTTP 错误状态
     if (!response.ok) {
       const errorBody = await response.text();
+      console.error(`[API Error] ${response.status} ${url}`, errorBody);
       // Throwing detailed error for caller to handle (e.g. 404)
       throw new Error(`HTTP Error ${response.status}: ${errorBody || response.statusText}`);
     }
@@ -74,12 +77,27 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     return result.data !== undefined ? result.data : (result as any);
   } catch (error) {
+    console.error(`[API Exception] ${url}`, error);
     // Re-throw to allow caller to handle connection errors
     throw error;
   }
 }
 
 export const api = {
+  // --- 系统基础接口 ---
+  system: {
+    /**
+     * 健康检查 / 连接测试
+     */
+    health: () => {
+      return request<{
+        status: string;
+        serverTime: string;
+        version: string;
+      }>('/system/health');
+    }
+  },
+
   // --- 终端设备相关接口 ---
   device: {
     /**

@@ -5,8 +5,8 @@ export interface Patient {
   number: string;
   windowName?: string; // Specific window name for centralized calling
   windowNumber?: string; // Specific window number for local binding
-  callTimestamp?: number; // To identify unique call events (e.g. recall)
-  checkInTime?: number; // When the patient was registered/checked in
+  callTimestamp?: number | string; // Updated to support string date from API
+  checkInTime?: number | string; // Updated to support string date from API
 }
 
 export interface ThemeColors {
@@ -46,6 +46,7 @@ export interface ZoneConfig {
   showWindowNumber?: boolean; // Toggle visibility of the number circle
   windowNumberFontSize?: number;
   windowNameFontSize?: number;
+  showWindowSubTitle?: boolean; // New: Toggle visibility of the subtitle
   windowSubTitleHtml?: string; // Rich text for "Please wait..."
   
   // Current Call Specific
@@ -192,7 +193,7 @@ export interface QueueConfig {
 export interface Preset {
   id: string;
   name: string;
-  timestamp: number;
+  timestamp: number | string; // Support string date
   config: QueueConfig;
 }
 
@@ -210,7 +211,7 @@ export interface DeviceBinding {
   linkedPresetId: string; // Which layout style to use
   
   status: 'online' | 'offline' | 'unregistered';
-  lastSeen: number;
+  lastSeen: number | string; // Support string date
 }
 
 export interface GlobalSystemSettings {
