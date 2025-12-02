@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import DisplayScreen from './components/DisplayScreen';
 import LoginPage from './components/LoginPage';
+import LandingPage from './components/LandingPage';
 import DeviceManager from './components/DeviceManager';
 import SystemSettings from './components/SystemSettings';
 import PatientQuery from './components/PatientQuery';
@@ -22,7 +24,22 @@ const isConfigStatic = (layout: QueueConfig['layout']): boolean => {
   return !hasDynamic;
 };
 
+// Define Route Modes
+type AppMode = 'landing' | 'admin' | 'tv';
+
 const App: React.FC = () => {
+  // --- 1. Routing State Initialization ---
+  const [appMode, setAppMode] = useState<AppMode>(() => {
+      const params = new URLSearchParams(window.location.search);
+      const m = params.get('mode');
+      if (m === 'tv') return 'tv';
+      if (m === 'admin') return 'admin';
+      return 'landing'; // Default to landing page for security
+  });
+
+  // Derived state for existing logic compatibility
+  const isTvMode = appMode === 'tv';
+
   const [config, setConfig] = useState<QueueConfig>(DEFAULT_CONFIG);
   
   const [globalSettings, setGlobalSettings] = useState<GlobalSystemSettings>(() => {
@@ -31,7 +48,6 @@ const App: React.FC = () => {
       if (params.get('resetConfig') === 'true') {
           console.log("Configuration reset triggered by URL parameter.");
           localStorage.removeItem('pqms_settings');
-          // Clean up URL without reloading
           window.history.replaceState({}, document.title, window.location.pathname);
           return DEFAULT_GLOBAL_SETTINGS;
       }
@@ -47,7 +63,6 @@ const App: React.FC = () => {
       return DEFAULT_GLOBAL_SETTINGS;
   });
 
-  const [isTvMode, setIsTvMode] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [dataVersion, setDataVersion] = useState('');
@@ -101,10 +116,11 @@ const App: React.FC = () => {
     const loadedPresets: Preset[] = savedPresets ? JSON.parse(savedPresets) : [];
 
     const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'tv') {
-       setIsTvMode(true);
-       setIsLoggedIn(true); 
-       
+    
+    // Logic dependent on mode
+    if (appMode === 'tv') {
+       // TV Mode Init
+       setIsLoggedIn(true); // TV implicitly trusted for view-only
        const devId = params.get('deviceId');
        if (devId) {
           api.device.getConfig(devId)
@@ -127,16 +143,18 @@ const App: React.FC = () => {
              system: { ...prev.system, deviceId: 'Unknown', isRegistered: false }
           }));
        }
-    } else {
+    } else if (appMode === 'admin') {
+        // Admin Mode Init
         setConfig(prev => ({
             ...prev,
             system: { ...prev.system, deviceId: 'AdminConsole', isRegistered: true }
         }));
     }
-  }, []);
+  }, [appMode]); // Re-run if mode changes
 
   useEffect(() => {
-    const shouldPoll = isTvMode || isLoggedIn;
+    // Only poll if we are in a mode that needs data
+    const shouldPoll = isTvMode || (appMode === 'admin' && isLoggedIn);
     if (!shouldPoll) return;
 
     const intervalSeconds = Math.max(config.dataSource?.pollingInterval || 5, 1);
@@ -149,14 +167,17 @@ const App: React.FC = () => {
         const isStatic = isConfigStatic(config.layout);
         const deviceId = config.system.deviceId;
 
+        // If in TV mode and config is static, poll for config changes instead of data
         if (isStatic && isTvMode && deviceId && deviceId !== 'Unknown') {
             try {
                 const remoteConfig = await api.device.getConfig(deviceId);
+                // Simple deep compare check to avoid re-renders if same
                 if (!isConfigStatic(remoteConfig.layout) || JSON.stringify(remoteConfig.layout) !== JSON.stringify(config.layout)) {
                      setConfig(prev => ({ ...remoteConfig, system: { ...prev.system, ...remoteConfig.system } }));
                 }
             } catch (e) {}
         } else {
+            // Normal Data Polling
             const windowFilter = config.speech?.broadcastMode === 'local' ? config.windowNumber : undefined;
             const snapshot = await api.queue.getSnapshot(windowFilter);
             setIsConnected(true); 
@@ -180,7 +201,7 @@ const App: React.FC = () => {
     const effectiveInterval = isConfigStatic(config.layout) ? 10 : intervalSeconds;
     const timer = setInterval(pollData, effectiveInterval * 1000);
     return () => clearInterval(timer);
-  }, [isTvMode, isLoggedIn, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system.deviceId]);
+  }, [appMode, isLoggedIn, isTvMode, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system.deviceId]);
 
   useEffect(() => {
       if (isConnected) {
@@ -190,17 +211,51 @@ const App: React.FC = () => {
       }
   }, [isConnected]);
 
-  if (isTvMode) return <DisplayScreen config={config} />;
+  // --- Render Logic Based on Mode ---
+
+  // 1. Landing Page (Default)
+  if (appMode === 'landing') {
+      return (
+          <LandingPage 
+            systemName={globalSettings.systemName}
+            onEnterAdmin={() => {
+                window.history.pushState({}, '', '?mode=admin');
+                setAppMode('admin');
+            }}
+            onEnterTv={() => {
+                window.history.pushState({}, '', '?mode=tv');
+                setAppMode('tv');
+            }}
+          />
+      );
+  }
+
+  // 2. TV Display Mode
+  if (isTvMode) {
+      return <DisplayScreen config={config} />;
+  }
   
+  // 3. Admin Mode - Login Gate
   if (!isLoggedIn) {
      return <LoginPage settings={globalSettings} onLogin={() => setIsLoggedIn(true)} />;
   }
 
+  // 4. Admin Mode - Dashboard
   return (
     <ToastProvider>
       <div className="flex h-screen w-screen bg-gray-100 overflow-hidden">
           <div className="w-64 bg-gray-900 text-white flex flex-col shrink-0">
-              <div className="p-4 border-b border-gray-800 flex items-center gap-2">
+              <div 
+                className="p-4 border-b border-gray-800 flex items-center gap-2 cursor-pointer hover:bg-gray-800 transition-colors"
+                onClick={() => {
+                    // Back to Landing Page option
+                    if (window.confirm('返回首页 (Landing Page)?')) {
+                        setIsLoggedIn(false);
+                        window.history.pushState({}, '', '/');
+                        setAppMode('landing');
+                    }
+                }}
+              >
                   <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold">Q</div>
                   <div className="font-bold text-lg">Queue Admin</div>
               </div>
