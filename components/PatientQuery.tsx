@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { QueueConfig, Patient } from '../types';
 import { Search, Filter, RotateCcw, ArrowRight, ArrowUp, Trash2, Clock, Monitor } from 'lucide-react';
 import api from '../services/api';
+import { useToast } from './ToastProvider';
+import ConfirmModal from './ConfirmModal';
 
 interface PatientQueryProps {
   config: QueueConfig;
@@ -20,6 +22,8 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<PatientStatus>('all');
   const [windowFilter, setWindowFilter] = useState<string>('all');
+  const toast = useToast();
+  const [deletePatient, setDeletePatient] = useState<HistoryItem | null>(null);
 
   // Flatten all data into a single searchable list
   const getAllPatients = (): HistoryItem[] => {
@@ -86,7 +90,8 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
     if (isConnected) {
         try {
             await api.queue.pass(patient.id);
-        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+            toast.success(`${patient.name} 已过号`);
+        } catch(e) { console.error('API Error:', e); toast.error('操作失败'); }
         return;
     }
 
@@ -113,13 +118,15 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
       waitingList: newWaiting,
       passedList: newPassed
     });
+    toast.success(`${patient.name} 已过号 (本地)`);
   };
 
   const handleRecall = async (patient: HistoryItem) => {
      if (isConnected) {
         try {
             await api.queue.recall(patient.id);
-        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+            toast.success(`重呼 ${patient.name}`);
+        } catch(e) { console.error('API Error:', e); toast.error('操作失败'); }
         return;
      }
 
@@ -131,6 +138,7 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
           ...config,
           currentPatient: { ...patient, callTimestamp: Date.now() }
         });
+        toast.success(`重呼 ${patient.name} (本地)`);
      }
   };
 
@@ -138,7 +146,8 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
     if (isConnected) {
         try {
             await api.queue.restore(patient.id);
-        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+            toast.success(`${patient.name} 已复位`);
+        } catch(e) { console.error('API Error:', e); toast.error('操作失败'); }
         return;
     }
 
@@ -152,13 +161,15 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
       passedList: newPassed,
       waitingList: newWaiting
     });
+    toast.success(`${patient.name} 已复位 (本地)`);
   };
 
   const handleTop = async (patient: HistoryItem) => {
     if (isConnected) {
         try {
             await api.queue.top(patient.id);
-        } catch(e) { console.error('API Error:', e); alert('操作失败'); }
+            toast.success(`${patient.name} 已置顶`);
+        } catch(e) { console.error('API Error:', e); toast.error('操作失败'); }
         return;
     }
 
@@ -171,30 +182,35 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
       ...config,
       waitingList: newWaiting
     });
+    toast.success(`${patient.name} 已置顶 (本地)`);
   };
 
-  const handleDelete = async (patient: HistoryItem) => {
-     if (confirm(`确定要删除 ${patient.name} 吗?`)) {
-        if (isConnected) {
-            try {
-                await api.queue.delete(patient.id);
-            } catch(e) { console.error('API Error:', e); alert('操作失败'); }
-            return;
-        }
+  const confirmDelete = async () => {
+     if (!deletePatient) return;
+     const patient = deletePatient;
 
-        if (!onUpdateConfig) return;
-        if (patient.status === 'waiting') {
-           onUpdateConfig({
-             ...config,
-             waitingList: config.waitingList.filter(p => p.id !== patient.id)
-           });
-        } else if (patient.status === 'passed') {
-           onUpdateConfig({
-             ...config,
-             passedList: config.passedList.filter(p => p.id !== patient.id)
-           });
+     if (isConnected) {
+         try {
+             await api.queue.delete(patient.id);
+             toast.success(`${patient.name} 已删除`);
+         } catch(e) { console.error('API Error:', e); toast.error('操作失败'); }
+     } else {
+        if (onUpdateConfig) {
+            if (patient.status === 'waiting') {
+               onUpdateConfig({
+                 ...config,
+                 waitingList: config.waitingList.filter(p => p.id !== patient.id)
+               });
+            } else if (patient.status === 'passed') {
+               onUpdateConfig({
+                 ...config,
+                 passedList: config.passedList.filter(p => p.id !== patient.id)
+               });
+            }
+            toast.success(`${patient.name} 已删除 (本地)`);
         }
      }
+     setDeletePatient(null);
   };
 
   return (
@@ -331,7 +347,7 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
                                <button onClick={() => handlePass(patient)} className="p-1.5 bg-orange-100 text-orange-700 rounded hover:bg-orange-200" title="过号">
                                  <ArrowRight size={16} />
                                </button>
-                               <button onClick={() => handleDelete(patient)} className="p-1.5 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600" title="删除">
+                               <button onClick={() => setDeletePatient(patient)} className="p-1.5 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600" title="删除">
                                  <Trash2 size={16} />
                                </button>
                              </>
@@ -343,7 +359,7 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
                                <button onClick={() => handleRestore(patient)} className="p-1.5 bg-green-100 text-green-700 rounded hover:bg-green-200" title="复位/重排">
                                  <RotateCcw size={16} />
                                </button>
-                               <button onClick={() => handleDelete(patient)} className="p-1.5 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600" title="删除">
+                               <button onClick={() => setDeletePatient(patient)} className="p-1.5 bg-gray-100 text-gray-500 rounded hover:bg-red-100 hover:text-red-600" title="删除">
                                  <Trash2 size={16} />
                                </button>
                              </>
@@ -370,6 +386,15 @@ const PatientQuery: React.FC<PatientQueryProps> = ({ config, onUpdateConfig, isC
              <span>数据源: {isConnected ? '实时 API (Live)' : '内存模拟 (Local)'}</span>
           </div>
        </div>
+
+       <ConfirmModal 
+         isOpen={!!deletePatient}
+         title="确认删除"
+         description={`确定要删除患者 ${deletePatient?.name} 吗？`}
+         onConfirm={confirmDelete}
+         onCancel={() => setDeletePatient(null)}
+         isDangerous={true}
+       />
     </div>
   );
 };

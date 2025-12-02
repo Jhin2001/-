@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
 import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
@@ -235,7 +237,12 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
     // Common Wrapper Style
     const wrapperClass = "w-full h-full shadow-lg relative overflow-hidden flex flex-col";
-    const wrapperStyle = { borderRadius: `${config.cardRounded}px`, backgroundColor: '#fff' };
+    // Use cardBackground and textMain from theme
+    const wrapperStyle = { 
+        borderRadius: `${config.cardRounded}px`, 
+        backgroundColor: theme.cardBackground || '#fff',
+        color: theme.textMain || '#111827'
+    };
 
     switch (zoneConfig.type) {
       case 'window-info':
@@ -351,18 +358,27 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                       key={patient.id} 
                       className={`
                         border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit gap-2
-                        ${isGrayed ? 'bg-gray-100 border-gray-200 text-gray-400' : ''}
-                        ${isHighlighted ? 'bg-orange-50 border-orange-200 ring-1 ring-orange-200' : ''}
-                        ${!isGrayed && !isHighlighted ? 'bg-gray-50 border-gray-100' : ''}
                       `}
+                      style={{
+                        // Dynamic Styles for Dark Mode / Custom Theme support
+                        backgroundColor: isGrayed ? 'rgba(0,0,0,0.05)' : isHighlighted ? 'rgba(255, 165, 0, 0.1)' : 'transparent',
+                        borderColor: isHighlighted ? 'rgba(255, 165, 0, 0.5)' : (theme.textMain ? `${theme.textMain}20` : '#e5e7eb'), // 20 = ~12% opacity
+                        color: isGrayed ? '#9ca3af' : (theme.textMain || '#374151')
+                      }}
                     >
                       {/* Name and Badges Container */}
                       <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                        <span className={`font-bold truncate ${isGrayed ? 'text-gray-400 decoration-slate-400' : isHighlighted ? 'text-orange-700' : 'text-gray-700'}`} style={{ fontSize: `${zoneConfig.contentFontSize || 24}px` }}>
+                        <span 
+                           className={`font-bold truncate ${isGrayed ? 'line-through' : ''}`} 
+                           style={{ 
+                               fontSize: `${zoneConfig.contentFontSize || 24}px`,
+                               color: isHighlighted ? '#c2410c' : 'inherit'
+                           }}
+                        >
                           {patient.name}
                         </span>
                         
-                        {isGrayed && <span className="flex-shrink-0 text-[10px] bg-gray-200 px-1 rounded whitespace-nowrap">过号</span>}
+                        {isGrayed && <span className="flex-shrink-0 text-[10px] bg-gray-200 text-gray-600 px-1 rounded whitespace-nowrap">过号</span>}
                         {isCurrent && isHighlighted && (
                            <span className="flex-shrink-0 text-[10px] bg-orange-200 text-orange-800 px-1 rounded font-bold animate-pulse whitespace-nowrap">正在叫号</span>
                         )}
@@ -401,8 +417,15 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                 }}
              >
               {visiblePassed.map((patient) => (
-                <div key={patient.id} className="bg-gray-50 border border-gray-100 rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit">
-                  <span className="font-bold text-gray-500 truncate" style={{ fontSize: `${zoneConfig.contentFontSize || 20}px` }}>
+                <div 
+                    key={patient.id} 
+                    className="border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit"
+                    style={{
+                        borderColor: theme.textMain ? `${theme.textMain}20` : '#e5e7eb',
+                        color: theme.textMain ? `${theme.textMain}90` : '#6b7280' // Slightly transparent text
+                    }}
+                >
+                  <span className="font-bold truncate" style={{ fontSize: `${zoneConfig.contentFontSize || 20}px` }}>
                     {patient.name}
                   </span>
                   {renderQueueNumber(patient.number, config.queueNumberStyle, 'text-xs')}

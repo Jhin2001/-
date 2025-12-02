@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { DeviceBinding, Preset } from '../types';
 import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi, CloudLightning, CloudOff, Server, ExternalLink } from 'lucide-react';
 import api from '../services/api';
+import { useToast } from './ToastProvider';
+import ConfirmModal from './ConfirmModal';
 
 interface DeviceManagerProps {
   devices: DeviceBinding[];
@@ -14,6 +16,8 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<DeviceBinding | null>(null);
   const [availablePresets, setAvailablePresets] = useState<{id: string, name: string}[]>([]);
+  const toast = useToast();
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Fetch from API if connected
   useEffect(() => {
@@ -57,12 +61,13 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
               await api.admin.saveDevice(serverDev);
               const apiDevices = await api.admin.getDevices();
               onUpdateDevices(apiDevices);
-              alert("服务端监视器已创建");
-          } catch(e) { console.error(e); alert("创建失败"); }
+              toast.success("服务端监视器已创建");
+          } catch(e) { console.error(e); toast.error("创建失败"); }
       } else {
           // Local
           const exists = devices.find(d => d.id === serverDev.id);
           if (!exists) onUpdateDevices([...devices, serverDev]);
+          toast.success("服务端监视器已创建 (本地)");
       }
   };
 
@@ -99,7 +104,6 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     if (isConnected) {
         try {
             // Fix: Ensure numerical values are converted to strings for backend compatibility
-            // "Cannot get the value of a token type 'Number' as a string"
             const payload = {
                 ...editForm,
                 // If lastSeen is a number (timestamp), convert to ISO string. If 0, use current time.
@@ -115,8 +119,9 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             onUpdateDevices(apiDevices);
             setEditingId(null);
             setEditForm(null);
+            toast.success("保存成功");
         } catch (e) {
-            alert('保存失败: API 错误');
+            toast.error('保存失败: API 错误');
             console.error(e);
         }
         return;
@@ -134,25 +139,29 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     onUpdateDevices(newDevices);
     setEditingId(null);
     setEditForm(null);
+    toast.success("保存成功 (本地)");
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm('确定删除此设备配置吗?')) {
-      if (isConnected) {
-          try {
-              await api.admin.deleteDevice(id);
-              const apiDevices = await api.admin.getDevices();
-              onUpdateDevices(apiDevices);
-          } catch(e) {
-              alert("删除失败");
-              console.error(e);
-          }
-          return;
-      }
-      
-      // Local Fallback
-      onUpdateDevices(devices.filter(d => d.id !== id));
+  const confirmDelete = async () => {
+    if (!deleteId) return;
+    const id = deleteId;
+    
+    if (isConnected) {
+        try {
+            await api.admin.deleteDevice(id);
+            const apiDevices = await api.admin.getDevices();
+            onUpdateDevices(apiDevices);
+            toast.success("删除成功");
+        } catch(e) {
+            toast.error("删除失败");
+            console.error(e);
+        }
+    } else {
+        // Local Fallback
+        onUpdateDevices(devices.filter(d => d.id !== id));
+        toast.success("删除成功 (本地)");
     }
+    setDeleteId(null);
   };
 
   const getStatusConfig = (status: string) => {
@@ -275,7 +284,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                         <Edit2 size={16} />
                       </button>
                       <button 
-                         onClick={() => handleDelete(device.id)}
+                         onClick={() => setDeleteId(device.id)}
                          className="text-red-500 hover:bg-red-50 p-2 rounded"
                       >
                         <Trash2 size={16} />
@@ -295,6 +304,15 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal 
+        isOpen={!!deleteId}
+        title="确认删除"
+        description="确定要删除此设备配置吗？"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteId(null)}
+        isDangerous={true}
+      />
     </div>
   );
 };

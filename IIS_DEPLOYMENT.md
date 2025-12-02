@@ -1,4 +1,5 @@
 
+
 # 药房排队系统前端 - IIS 部署指南
 
 本文档介绍如何将药房排队系统的前端项目（React）部署到 Windows Server 的 IIS (Internet Information Services) 上。
@@ -68,6 +69,18 @@
     2. 双击你的网站对应的应用程序池。
     3. 将 **.NET CLR 版本** 设置为 **无托管代码 (No Managed Code)**。
     4. 确定并回收/重启应用程序池。
+
+### Q5: DELETE/PUT 请求失败 (405 Method Not Allowed 或 Network Error)
+*   **现象**: 在管理后台删除设备或预案时，控制台报错 "Failed to fetch" 或 "405 Method Not Allowed"。
+*   **原因**: IIS 默认启用了 **WebDAV 模块**，该模块通常会拦截并阻止 `PUT` 和 `DELETE` 请求。
+*   **解决**: 
+    *   **方法一 (推荐)**: 确保项目根目录下的 `web.config` 包含 `<modules><remove name="WebDAVModule" /></modules>`。构建后的 `web.config` 已经默认包含了此修复。
+    *   **方法二 (手动)**: 
+        1. 在 IIS 管理器中，点击你的网站。
+        2. 双击 **模块 (Modules)**。
+        3. 找到 `WebDAVModule`，右键点击 -> **删除**。
+        4. 返回网站首页，双击 **处理程序映射 (Handler Mappings)**。
+        5. 找到 `WebDAV`，右键点击 -> **删除**。
 
 ## 5. API 连接配置
 

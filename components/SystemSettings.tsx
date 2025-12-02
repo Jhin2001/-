@@ -1,9 +1,9 @@
-
 import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
 import { Settings, Image, Key, Type, Database, Save, Check, Link, Activity, ExternalLink, AlertTriangle, CloudLightning, CloudOff, FolderOpen } from 'lucide-react';
 import api from '../services/api';
 import MediaLibraryModal from './MediaLibraryModal';
+import { useToast } from './ToastProvider';
 
 interface SystemSettingsProps {
   settings: GlobalSystemSettings;
@@ -18,6 +18,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
   
   // Media Modal
   const [showMediaModal, setShowMediaModal] = useState(false);
+  const toast = useToast();
 
   const handleChange = (key: keyof GlobalSystemSettings, value: any) => {
     onUpdate({ ...settings, [key]: value });
@@ -47,12 +48,14 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
             await api.admin.saveSystemSettings(settings);
         } catch (e) {
             console.error("Failed to sync settings to server", e);
+            toast.error("云端同步失败，但本地保存成功");
             // We don't block the 'saved' status because local save was successful
             // and local saving of the API URL is the primary function here.
         }
     }
 
     setSaveStatus('saved');
+    toast.success("系统设置已保存");
     setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
@@ -82,9 +85,11 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
       if (res.ok) {
          setTestStatus('success');
          setTestMsg('连接成功！API 服务正常。');
+         toast.success('连接成功');
       } else {
          setTestStatus('error');
          setTestMsg(`连接失败: 服务器返回状态码 ${res.status}`);
+         toast.error(`连接失败: ${res.status}`);
       }
     } catch (e: any) {
        console.error("API Test Failed:", e);
@@ -93,8 +98,10 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
        // Detect SSL Error / Network Error
        if (e.name === 'TypeError' && e.message === 'Failed to fetch') {
           setTestMsg('连接被拒绝。可能是 SSL 证书未被信任，或者 API 地址错误。');
+          toast.error('连接被拒绝，请检查证书或地址');
        } else {
           setTestMsg(`连接错误: ${e.message}`);
+          toast.error('连接发生异常');
        }
     }
   };

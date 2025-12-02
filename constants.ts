@@ -7,8 +7,8 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSystemSettings = {
   loginSubtitle: 'Distributed Queue Management System',
   loginBackgroundImage: 'https://images.unsplash.com/photo-1516549655169-df83a0929519?q=80&w=2070&auto=format&fit=crop',
   adminPassword: '123456',
-  apiBaseUrl: 'https://localhost:30335/api/v1', // Updated to VS IIS Express port
-  apiPort: 8080,
+  apiBaseUrl: 'http://localhost:8081/api/v1', // Updated to new default port 8081
+  apiPort: 8081,
   systemName: '南部市中心医院'
 };
 

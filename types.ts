@@ -14,6 +14,9 @@ export interface ThemeColors {
   secondary: string;
   textOnPrimary: string;
   background: string;
+  // New customizable colors
+  cardBackground: string;
+  textMain: string;
 }
 
 // Available types of content for any zone
@@ -275,24 +278,32 @@ export const PRESET_THEMES = {
     primary: '#7c3aed',
     secondary: '#db2777',
     textOnPrimary: '#ffffff',
-    background: '#f3f4f6'
+    background: '#f3f4f6',
+    cardBackground: '#ffffff',
+    textMain: '#111827'
   },
   blue: {
     primary: '#2563eb',
     secondary: '#f59e0b',
     textOnPrimary: '#ffffff',
-    background: '#eff6ff'
+    background: '#eff6ff',
+    cardBackground: '#ffffff',
+    textMain: '#111827'
   },
   green: {
     primary: '#059669',
     secondary: '#ea580c',
     textOnPrimary: '#ffffff',
-    background: '#ecfdf5'
+    background: '#ecfdf5',
+    cardBackground: '#ffffff',
+    textMain: '#111827'
   },
   dark: {
     primary: '#1f2937',
     secondary: '#dc2626',
     textOnPrimary: '#ffffff',
-    background: '#111827'
+    background: '#111827',
+    cardBackground: '#1f2937', // Dark card
+    textMain: '#f9fafb' // Light text
   }
 };

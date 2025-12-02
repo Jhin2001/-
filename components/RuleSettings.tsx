@@ -1,12 +1,15 @@
-
 import React, { useEffect, useState } from 'react';
 import { GitBranch, Plus, Save, Trash2, AlertTriangle, Info } from 'lucide-react';
 import api from '../services/api';
 import { QueueRule } from '../types';
+import { useToast } from './ToastProvider';
+import ConfirmModal from './ConfirmModal';
 
 const RuleSettings: React.FC = () => {
     const [rules, setRules] = useState<QueueRule[]>([]);
     const [loading, setLoading] = useState(true);
+    const toast = useToast();
+    const [deleteId, setDeleteId] = useState<string | null>(null);
 
     useEffect(() => {
         loadRules();
@@ -39,16 +42,17 @@ const RuleSettings: React.FC = () => {
     };
 
     const saveRule = async (rule: QueueRule) => {
-        if (!rule.prefix) { alert("前缀不能为空"); return; }
+        if (!rule.prefix) { toast.error("前缀不能为空"); return; }
         await api.admin.saveRule(rule);
-        alert("规则已保存");
+        toast.success("规则已保存");
     };
 
-    const deleteRule = async (id: string) => {
-        if (confirm("删除此规则?")) {
-            await api.admin.deleteRule(id);
-            setRules(rules.filter(r => r.id !== id));
-        }
+    const confirmDelete = async () => {
+        if (!deleteId) return;
+        await api.admin.deleteRule(deleteId);
+        setRules(rules.filter(r => r.id !== deleteId));
+        toast.success("规则已删除");
+        setDeleteId(null);
     };
 
     return (
@@ -130,7 +134,7 @@ const RuleSettings: React.FC = () => {
                                 <Save size={20} />
                             </button>
                             <button 
-                                onClick={() => deleteRule(rule.id)}
+                                onClick={() => setDeleteId(rule.id)}
                                 className="p-2 text-red-500 hover:bg-red-50 rounded border border-transparent hover:border-red-200 transition-colors"
                                 title="删除"
                             >
@@ -146,6 +150,15 @@ const RuleSettings: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            <ConfirmModal 
+                isOpen={!!deleteId}
+                title="删除规则"
+                description="确定要删除此分诊规则吗？"
+                onConfirm={confirmDelete}
+                onCancel={() => setDeleteId(null)}
+                isDangerous={true}
+            />
         </div>
     );
 };

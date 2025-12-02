@@ -12,7 +12,7 @@ const getBaseUrl = () => {
         } catch(e) {}
     }
     // Fallback default
-    return 'https://localhost:30335/api/v1'; 
+    return 'http://localhost:8081/api/v1'; 
 }
 
 interface ApiResponse<T> {
@@ -54,7 +54,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     // 'Authorization': `Bearer ${localStorage.getItem('token')}` 
   };
 
-  if (!(options.body instanceof FormData)) {
+  // Fix: Only add Content-Type if body exists (and is not FormData)
+  // Some servers (IIS/WebDAV/Firewalls) block DELETE/GET requests that have Content-Type header
+  if (!(options.body instanceof FormData) && options.body) {
       defaultHeaders['Content-Type'] = 'application/json';
   }
 
@@ -98,12 +100,37 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   } catch (error: any) {
     console.error(`[API Exception] ${url}`, error);
     
-    if (error.message === 'Failed to fetch') {
+    if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
         const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
         const isHttps = url.startsWith('https');
+        const currentUrl = url;
         
         if (isLocalhost && isHttps) {
-             throw new ApiError('连接失败: 本地 HTTPS 证书可能未被信任，或 API 服务未启动。请尝试在浏览器中直接访问 API 地址。');
+             // 尝试提供 HTTP 替代方案
+             const httpUrl = currentUrl.replace('https://', 'http://');
+             throw new ApiError(
+               `连接失败: 无法连接到 ${currentUrl}\n\n` +
+               `可能的原因：\n` +
+               `1. API 服务未启动\n` +
+               `2. HTTPS 证书未信任（本地开发环境）\n` +
+               `3. 端口或地址配置错误\n\n` +
+               `建议：\n` +
+               `- 如果使用 IIS 部署，请将 API 地址改为 HTTP: ${httpUrl}\n` +
+               `- 在浏览器中直接访问 API 地址测试连接\n` +
+               `- 检查系统设置中的 API 地址配置`
+             );
+        } else if (isLocalhost) {
+             throw new ApiError(
+               `连接失败: 无法连接到 ${currentUrl}\n\n` +
+               `可能的原因：\n` +
+               `1. API 服务未启动\n` +
+               `2. 端口或地址配置错误\n` +
+               `3. 防火墙阻止了连接\n\n` +
+               `建议：\n` +
+               `- 确认 API 服务正在运行\n` +
+               `- 在浏览器中直接访问: ${currentUrl.replace('/api/v1', '/api/v1/system/health')}\n` +
+               `- 检查系统设置中的 API 地址配置`
+             );
         }
     }
     throw error;

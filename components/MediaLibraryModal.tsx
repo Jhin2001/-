@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload, Image, Film, File, Trash2, Check, CloudOff, AlertTriangle } from 'lucide-react';
 import api, { MediaFile } from '../services/api';
+import { useToast } from './ToastProvider';
 
 interface MediaLibraryModalProps {
   isOpen: boolean;
@@ -19,6 +19,7 @@ const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (isOpen) {
@@ -67,7 +68,7 @@ const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
       const isVideo = file.type.startsWith('video');
       const isImage = file.type.startsWith('image');
       if (!isVideo && !isImage) {
-          alert("只支持图片或视频文件");
+          toast.error("只支持图片或视频文件");
           setUploading(false);
           return;
       }
@@ -78,15 +79,12 @@ const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
           try {
               const newFile = await api.admin.uploadFile(file);
               setFiles(prev => [newFile, ...prev]);
+              toast.success("上传成功");
           } catch (e: any) {
-              alert(`上传失败: ${e.message}`);
+              toast.error(`上传失败: ${e.message}`);
           }
       } else {
           // Local Simulation using FileReader (Base64) or ObjectURL
-          // For persistent local storage demo, we use Base64 (Careful with size!)
-          // Or simplified: use URL.createObjectURL (valid only for session)
-          
-          // Better approach for demo: Create a fake MediaFile object
           const reader = new FileReader();
           reader.onload = (e) => {
               const result = e.target?.result as string;
@@ -103,8 +101,9 @@ const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
               // Save to local storage (Only small files will work well)
               try {
                 localStorage.setItem('pqms_local_media', JSON.stringify(updated));
+                toast.success("上传成功 (本地模拟)");
               } catch(err) {
-                  alert("本地存储空间不足，无法保存大文件。请连接 API 使用。");
+                  toast.error("本地存储空间不足");
               }
           };
           reader.readAsDataURL(file);

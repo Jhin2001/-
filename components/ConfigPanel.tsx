@@ -1,14 +1,14 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { QueueConfig, PRESET_THEMES, ContentType, QueueNumberStyle, PassedDisplayMode, ZoneConfig } from '../types';
 import api from '../services/api';
-import DisplayScreen from './DisplayScreen'; // Import DisplayScreen for preview
+import DisplayScreen from './DisplayScreen';
 import MediaLibraryModal from './MediaLibraryModal';
 import { 
   Settings, Layout, Type, Palette, Mic, Database, 
   Save, FolderOpen, RefreshCw, Smartphone, Monitor,
   Grid, Trash2, AlertTriangle, Check, CloudLightning, CloudOff, X, Maximize, Lock, Copy, Video, Image
 } from 'lucide-react';
+import { useToast } from './ToastProvider';
 
 interface ConfigPanelProps {
   config: QueueConfig;
@@ -45,6 +45,7 @@ const CONTENT_TYPES: { id: ContentType; label: string }[] = [
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isConnected }) => {
   const [activeTab, setActiveTab] = useState('layout');
   const [selectedZone, setSelectedZone] = useState<keyof QueueConfig['layout']>('topLeft');
+  const toast = useToast();
   
   // State to track current editing context
   const [currentPresetId, setCurrentPresetId] = useState<string | null>(null);
@@ -156,7 +157,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                .catch(e => {
                   if (e.message && e.message.includes('Failed to fetch')) return;
                   console.error(e);
-                  alert('获取预案列表失败，请检查网络或后端日志');
+                  toast.error('获取预案列表失败');
                });
          } else {
              const saved = localStorage.getItem('pharmacy-queue-presets');
@@ -181,7 +182,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         configData = JSON.parse(configData);
                     } catch (e) {
                         console.error("Failed to parse config JSON", e);
-                        alert("预案数据损坏");
+                        toast.error("预案数据损坏");
                         return;
                     }
                 }
@@ -195,8 +196,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                 setCurrentPresetName(preset.name || '未命名预案');
                 
                 setShowLoadModal(false);
+                toast.success('预案加载成功');
             }
-        } catch(e) { console.error(e); alert('加载失败'); }
+        } catch(e) { console.error(e); toast.error('加载失败'); }
         return;
     }
 
@@ -215,6 +217,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           setCurrentPresetName(target.name);
           
           setShowLoadModal(false);
+          toast.success('预案加载成功 (本地)');
        }
     }
   };
@@ -240,9 +243,15 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                  setCurrentPresetId(null);
                  setCurrentPresetName('');
              }
+             toast.success('删除成功');
          } catch(e: any) { 
              console.error("[ConfigPanel] Delete error:", e); 
-             alert(`删除失败: ${e.message || 'API 请求错误'}`);
+             // Enhanced Error Handling for WebDAV/IIS issues
+             let errMsg = e.message || 'API 请求错误';
+             if (errMsg === 'Failed to fetch') {
+                 errMsg = '连接失败。如果是 IIS 部署，请检查是否在 web.config 中移除了 WebDAV 模块 (IIS 默认拦截 DELETE 请求)。';
+             }
+             toast.error(`删除失败: ${errMsg}`);
          }
      } else {
          const saved = localStorage.getItem('pharmacy-queue-presets');
@@ -255,6 +264,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                 setCurrentPresetId(null);
                 setCurrentPresetName('');
             }
+            toast.success('删除成功 (本地)');
          }
      }
      setDeleteConfirmId(null);
@@ -275,11 +285,11 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           try {
               // Pass EXISTING ID to update
               await api.admin.savePreset(currentPresetId, currentPresetName, config);
-              alert("更新成功");
+              toast.success("更新成功");
               setShowOverwriteModal(false);
           } catch(e: any) {
               console.error(e);
-              alert(`更新失败: ${e.message}`);
+              toast.error(`更新失败: ${e.message}`);
           }
           return;
       }
@@ -292,7 +302,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           list[idx].config = config;
           list[idx].timestamp = Date.now();
           localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
-          alert("更新成功 (本地)");
+          toast.success("更新成功 (本地)");
       }
       setShowOverwriteModal(false);
   };
@@ -320,14 +330,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           try {
               // Pass NEW ID to create
               await api.admin.savePreset(newPreset.id, newPreset.name, newPreset.config);
-              alert("另存为成功");
+              toast.success("另存为成功");
               // Switch context to new preset
               setCurrentPresetId(newPresetId);
               setCurrentPresetName(saveName);
               setShowSaveAsModal(false);
           } catch(e: any) {
               console.error(e);
-              alert(`保存失败: ${e.message}`);
+              toast.error(`保存失败: ${e.message}`);
           }
           return;
       }
@@ -337,7 +347,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
       const list = saved ? JSON.parse(saved) : [];
       list.push(newPreset);
       localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
-      alert("另存为成功 (本地)");
+      toast.success("另存为成功 (本地)");
       
       setCurrentPresetId(newPresetId);
       setCurrentPresetName(saveName);
@@ -888,8 +898,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                    </div>
                 )}
                 
-                {/* ... other tabs (theme, voice, data) ... */}
-                {/* Keeping the rest of the file rendering logic which handles theme, voice, data tabs */}
                 {activeTab === 'theme' && (
                    <div className="space-y-4">
                       {/* Presets */}
@@ -968,6 +976,36 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                                   <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.textOnPrimary}</div>
                                </div>
                             </div>
+
+                            {/* New Colors */}
+                            <div className="border-t border-dashed my-2"></div>
+                            
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.cardBackground || '#ffffff'} 
+                                  onChange={(e) => handleUpdate(['theme', 'cardBackground'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">卡片背景色 (Card BG)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.cardBackground || '#ffffff'}</div>
+                               </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                               <input 
+                                  type="color" 
+                                  value={config.theme.textMain || '#111827'} 
+                                  onChange={(e) => handleUpdate(['theme', 'textMain'], e.target.value)}
+                                  className="h-9 w-9 rounded cursor-pointer border-0 p-0"
+                               />
+                               <div className="flex-1">
+                                  <label className="block text-xs font-medium text-gray-700">内容文字色 (Main Text)</label>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.textMain || '#111827'}</div>
+                               </div>
+                            </div>
+
                          </div>
                       </div>
 
@@ -1148,7 +1186,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                                         className="w-full border p-1.5 rounded text-xs font-mono"
                                     />
                                     <button 
-                                        onClick={() => alert("连接测试功能需后端支持 (请保存后查看后端日志)")}
+                                        onClick={() => toast.info("连接测试功能需后端支持 (请保存后查看后端日志)")}
                                         className="mt-1 text-xs text-blue-600 hover:underline flex items-center gap-1"
                                     >
                                         <CloudLightning size={10} /> 测试数据库连接
