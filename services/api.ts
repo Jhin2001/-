@@ -1,15 +1,16 @@
-
 import { QueueConfig, Patient, GlobalSystemSettings, DeviceBinding, DashboardMetrics, AuditLog, QueueRule } from '../types';
 
 // Helper to get base URL dynamically
 const getBaseUrl = () => {
     // Try to read the global settings object first
-    const settingsStr = localStorage.getItem('pqms_settings');
-    if (settingsStr) {
-        try {
+    try {
+        const settingsStr = localStorage.getItem('pqms_settings');
+        if (settingsStr) {
             const settings = JSON.parse(settingsStr);
             if (settings.apiBaseUrl) return settings.apiBaseUrl;
-        } catch(e) {}
+        }
+    } catch(e) {
+        // Fallback or silence error in preview mode
     }
     // Fallback default
     return 'http://localhost:8081/api/v1'; 
@@ -85,7 +86,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 
     const text = await response.text();
-    const result: ApiResponse<T> = text ? JSON.parse(text) : {};
+    // Safely handle empty response that isn't 204
+    if (!text) return {} as T;
+    
+    const result: ApiResponse<T> = JSON.parse(text);
 
     if (result.code !== undefined && result.code !== 0 && result.code !== 200) {
       throw new ApiError(result.message || 'Unknown Business Error', result.code);
@@ -95,7 +99,15 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       return result.data;
     }
     
-    throw new ApiError('Invalid API response: data field is missing');
+    // Some APIs might return the object directly without wrapper, or result.data is null
+    // If result has keys but no 'data', assume result IS the data for legacy compatibility
+    if (Object.keys(result).length > 0 && result.data === undefined) {
+         return result as unknown as T;
+    }
+    
+    // Strict mode: if we expect data but got none
+    // throw new ApiError('Invalid API response: data field is missing');
+    return {} as T;
     
   } catch (error: any) {
     console.error(`[API Exception] ${url}`, error);
@@ -328,8 +340,10 @@ export const api = {
          try {
             return await request<QueueRule[]>('/admin/rules');
         } catch (e) {
-            const saved = localStorage.getItem('pqms_rules');
-            return saved ? JSON.parse(saved) : [];
+            try {
+                const saved = localStorage.getItem('pqms_rules');
+                return saved ? JSON.parse(saved) : [];
+            } catch(e) { return []; }
         }
     },
 
@@ -338,12 +352,14 @@ export const api = {
             return await request<void>('/admin/rules', { method: 'POST', body: JSON.stringify(rule) });
         } catch (e) {
             // Local fallback
-            const saved = localStorage.getItem('pqms_rules');
-            const rules: QueueRule[] = saved ? JSON.parse(saved) : [];
-            const idx = rules.findIndex(r => r.id === rule.id);
-            if (idx >= 0) rules[idx] = rule;
-            else rules.push(rule);
-            localStorage.setItem('pqms_rules', JSON.stringify(rules));
+            try {
+                const saved = localStorage.getItem('pqms_rules');
+                const rules: QueueRule[] = saved ? JSON.parse(saved) : [];
+                const idx = rules.findIndex(r => r.id === rule.id);
+                if (idx >= 0) rules[idx] = rule;
+                else rules.push(rule);
+                localStorage.setItem('pqms_rules', JSON.stringify(rules));
+            } catch(e) {}
         }
     },
 
@@ -352,11 +368,13 @@ export const api = {
             return await request<void>(`/admin/rules/${id}`, { method: 'DELETE' });
         } catch (e) {
             // Local fallback
-            const saved = localStorage.getItem('pqms_rules');
-            if(saved) {
-                const rules: QueueRule[] = JSON.parse(saved);
-                localStorage.setItem('pqms_rules', JSON.stringify(rules.filter(r => r.id !== id)));
-            }
+            try {
+                const saved = localStorage.getItem('pqms_rules');
+                if(saved) {
+                    const rules: QueueRule[] = JSON.parse(saved);
+                    localStorage.setItem('pqms_rules', JSON.stringify(rules.filter(r => r.id !== id)));
+                }
+            } catch(e) {}
         }
     }
   }

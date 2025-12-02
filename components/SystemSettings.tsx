@@ -39,7 +39,8 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
     try {
         localStorage.setItem('pqms_settings', JSON.stringify(settings));
     } catch (e) {
-        console.error("Failed to save settings to localStorage", e);
+        console.error("Failed to save settings to localStorage (Quota exceeded or restricted?)", e);
+        toast.error("本地缓存保存失败 (受限环境)");
     }
 
     // 2. If connected, try to sync with Backend
@@ -48,9 +49,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
             await api.admin.saveSystemSettings(settings);
         } catch (e) {
             console.error("Failed to sync settings to server", e);
-            toast.error("云端同步失败，但本地保存成功");
-            // We don't block the 'saved' status because local save was successful
-            // and local saving of the API URL is the primary function here.
+            toast.error("云端同步失败，但本地保存尝试已执行");
         }
     }
 

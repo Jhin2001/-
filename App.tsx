@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DisplayScreen from './components/DisplayScreen';
 import LoginPage from './components/LoginPage';
-import LandingPage from './components/LandingPage';
+// LandingPage removed
 import DeviceManager from './components/DeviceManager';
 import SystemSettings from './components/SystemSettings';
 import PatientQuery from './components/PatientQuery';
@@ -10,22 +10,25 @@ import ConfigPanel from './components/ConfigPanel';
 import Dashboard from './components/Dashboard';
 import AuditLogViewer from './components/AuditLogViewer';
 import RuleSettings from './components/RuleSettings';
+import ErrorBoundary from './components/ErrorBoundary'; // Import ErrorBoundary
 import { QueueConfig, DeviceBinding, Preset, GlobalSystemSettings, Patient, ZoneConfig } from './types';
 import { DEFAULT_CONFIG, DEFAULT_GLOBAL_SETTINGS, DEFAULT_DEVICES } from './constants';
 import api from './services/api';
-import { Layout, Monitor, Search, BarChart3, FileText, GitBranch, Settings } from 'lucide-react';
+import { Layout, Monitor, Search, BarChart3, FileText, GitBranch, Settings, LogOut } from 'lucide-react';
 import { ToastProvider } from './components/ToastProvider';
 
 // Helper to check if the current configuration is purely static
 const isConfigStatic = (layout: QueueConfig['layout']): boolean => {
+  if (!layout) return false;
+  // Ensure zone exists before checking type (safety check against partial API data)
   const zones: ZoneConfig[] = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
   const dynamicTypes = ['waiting-list', 'current-call', 'window-info', 'passed-list'];
-  const hasDynamic = zones.some(z => z.type !== 'hidden' && dynamicTypes.includes(z.type));
+  const hasDynamic = zones.some(z => z && z.type !== 'hidden' && dynamicTypes.includes(z.type));
   return !hasDynamic;
 };
 
 // Define Route Modes
-type AppMode = 'landing' | 'admin' | 'tv';
+type AppMode = 'admin' | 'tv';
 
 const App: React.FC = () => {
   // --- 1. Routing State Initialization ---
@@ -33,8 +36,8 @@ const App: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       const m = params.get('mode');
       if (m === 'tv') return 'tv';
-      if (m === 'admin') return 'admin';
-      return 'landing'; // Default to landing page for security
+      // Default to 'admin' for root path or explicit 'admin' mode
+      return 'admin';
   });
 
   // Derived state for existing logic compatibility
@@ -47,18 +50,20 @@ const App: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       if (params.get('resetConfig') === 'true') {
           console.log("Configuration reset triggered by URL parameter.");
-          localStorage.removeItem('pqms_settings');
+          try {
+            localStorage.removeItem('pqms_settings');
+          } catch(e) { console.warn("LocalStorage clear failed:", e); }
           window.history.replaceState({}, document.title, window.location.pathname);
           return DEFAULT_GLOBAL_SETTINGS;
       }
 
-      const saved = localStorage.getItem('pqms_settings');
-      if (saved) {
-          try {
-              return { ...DEFAULT_GLOBAL_SETTINGS, ...JSON.parse(saved) };
-          } catch (e) {
-              console.error("Failed to parse saved settings", e);
-          }
+      try {
+        const saved = localStorage.getItem('pqms_settings');
+        if (saved) {
+            return { ...DEFAULT_GLOBAL_SETTINGS, ...JSON.parse(saved) };
+        }
+      } catch (e) {
+          console.warn("Failed to load settings from localStorage (Preview Mode?):", e);
       }
       return DEFAULT_GLOBAL_SETTINGS;
   });
@@ -110,10 +115,21 @@ const App: React.FC = () => {
   useEffect(() => {
     api.system.health().then(() => setIsConnected(true)).catch(() => setIsConnected(false));
     
-    const savedDevices = localStorage.getItem('pharmacy-queue-devices');
-    const loadedDevices: DeviceBinding[] = savedDevices ? JSON.parse(savedDevices) : DEFAULT_DEVICES;
-    const savedPresets = localStorage.getItem('pharmacy-queue-presets');
-    const loadedPresets: Preset[] = savedPresets ? JSON.parse(savedPresets) : [];
+    let loadedDevices: DeviceBinding[] = DEFAULT_DEVICES;
+    let loadedPresets: Preset[] = [];
+
+    try {
+        const savedDevices = localStorage.getItem('pharmacy-queue-devices');
+        if (savedDevices) loadedDevices = JSON.parse(savedDevices);
+        
+        const savedPresetsStr = localStorage.getItem('pharmacy-queue-presets');
+        if (savedPresetsStr) loadedPresets = JSON.parse(savedPresetsStr);
+    } catch (e) {
+        console.warn("LocalStorage access error:", e);
+    }
+
+    setDevices(loadedDevices);
+    setPresets(loadedPresets);
 
     const params = new URLSearchParams(window.location.search);
     
@@ -125,14 +141,17 @@ const App: React.FC = () => {
        if (devId) {
           api.device.getConfig(devId)
             .then(remoteConfig => {
-                setConfig({
-                    ...remoteConfig,
+                // Safe merge
+                setConfig(prev => ({
+                    ...prev,
+                    ...remoteConfig, // Apply remote
                     system: {
-                        ...remoteConfig.system,
+                        ...prev.system,
+                        ...(remoteConfig.system || {}),
                         deviceId: devId,
                         isRegistered: remoteConfig.system?.isRegistered ?? true 
                     }
-                });
+                }));
             })
             .catch(e => {
                 initTvModeLocalFallback(devId, loadedDevices, loadedPresets);
@@ -143,8 +162,8 @@ const App: React.FC = () => {
              system: { ...prev.system, deviceId: 'Unknown', isRegistered: false }
           }));
        }
-    } else if (appMode === 'admin') {
-        // Admin Mode Init
+    } else {
+        // Admin Mode Init (Default)
         setConfig(prev => ({
             ...prev,
             system: { ...prev.system, deviceId: 'AdminConsole', isRegistered: true }
@@ -164,16 +183,30 @@ const App: React.FC = () => {
              try { await api.system.health(); setIsConnected(true); } catch(e) { setIsConnected(false); return; }
         }
         
-        const isStatic = isConfigStatic(config.layout);
-        const deviceId = config.system.deviceId;
+        // Safety: Check if layout exists before accessing
+        const isStatic = config.layout ? isConfigStatic(config.layout) : false;
+        const deviceId = config.system?.deviceId;
+        const isUnregistered = !config.system?.isRegistered;
 
-        // If in TV mode and config is static, poll for config changes instead of data
-        if (isStatic && isTvMode && deviceId && deviceId !== 'Unknown') {
+        // If in TV mode and config is static OR UNREGISTERED, poll for config changes instead of data.
+        if ((isStatic || isUnregistered) && isTvMode && deviceId && deviceId !== 'Unknown') {
             try {
                 const remoteConfig = await api.device.getConfig(deviceId);
                 // Simple deep compare check to avoid re-renders if same
-                if (!isConfigStatic(remoteConfig.layout) || JSON.stringify(remoteConfig.layout) !== JSON.stringify(config.layout)) {
-                     setConfig(prev => ({ ...remoteConfig, system: { ...prev.system, ...remoteConfig.system } }));
+                // Also check if registration status changed
+                const regChanged = remoteConfig.system?.isRegistered !== config.system?.isRegistered;
+                
+                // Safe access for comparison
+                const remoteLayoutStr = JSON.stringify(remoteConfig.layout || {});
+                const localLayoutStr = JSON.stringify(config.layout || {});
+
+                if (regChanged || !isConfigStatic(remoteConfig.layout) || remoteLayoutStr !== localLayoutStr) {
+                     // DEEP MERGE STRATEGY: Preserve local defaults if remote is partial
+                     setConfig(prev => ({ 
+                        ...prev, 
+                        ...remoteConfig, 
+                        system: { ...prev.system, ...(remoteConfig.system || {}) } 
+                     }));
                 }
             } catch (e) {}
         } else {
@@ -198,10 +231,12 @@ const App: React.FC = () => {
     };
 
     pollData();
-    const effectiveInterval = isConfigStatic(config.layout) ? 10 : intervalSeconds;
+    // Safety check for layout
+    const isStaticSafe = config.layout ? isConfigStatic(config.layout) : false;
+    const effectiveInterval = isStaticSafe ? 10 : intervalSeconds;
     const timer = setInterval(pollData, effectiveInterval * 1000);
     return () => clearInterval(timer);
-  }, [appMode, isLoggedIn, isTvMode, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system.deviceId]);
+  }, [appMode, isLoggedIn, isTvMode, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system?.deviceId, config.system?.isRegistered]);
 
   useEffect(() => {
       if (isConnected) {
@@ -211,133 +246,121 @@ const App: React.FC = () => {
       }
   }, [isConnected]);
 
-  // --- Render Logic Based on Mode ---
+  // --- Render Content ---
+  const renderContent = () => {
+      // 1. TV Display Mode (Explicit 'mode=tv')
+      if (isTvMode) {
+          return <DisplayScreen config={config} />;
+      }
+      
+      // 2. Admin Mode - Login Gate (Default for root path)
+      if (!isLoggedIn) {
+         return <LoginPage settings={globalSettings} onLogin={() => setIsLoggedIn(true)} />;
+      }
 
-  // 1. Landing Page (Default)
-  if (appMode === 'landing') {
+      // 3. Admin Mode - Dashboard
       return (
-          <LandingPage 
-            systemName={globalSettings.systemName}
-            onEnterAdmin={() => {
-                window.history.pushState({}, '', '?mode=admin');
-                setAppMode('admin');
-            }}
-            onEnterTv={() => {
-                window.history.pushState({}, '', '?mode=tv');
-                setAppMode('tv');
-            }}
-          />
-      );
-  }
-
-  // 2. TV Display Mode
-  if (isTvMode) {
-      return <DisplayScreen config={config} />;
-  }
-  
-  // 3. Admin Mode - Login Gate
-  if (!isLoggedIn) {
-     return <LoginPage settings={globalSettings} onLogin={() => setIsLoggedIn(true)} />;
-  }
-
-  // 4. Admin Mode - Dashboard
-  return (
-    <ToastProvider>
-      <div className="flex h-screen w-screen bg-gray-100 overflow-hidden">
-          <div className="w-64 bg-gray-900 text-white flex flex-col shrink-0">
-              <div 
-                className="p-4 border-b border-gray-800 flex items-center gap-2 cursor-pointer hover:bg-gray-800 transition-colors"
-                onClick={() => {
-                    // Back to Landing Page option
-                    if (window.confirm('返回首页 (Landing Page)?')) {
-                        setIsLoggedIn(false);
-                        window.history.pushState({}, '', '/');
-                        setAppMode('landing');
-                    }
-                }}
-              >
-                  <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold">Q</div>
-                  <div className="font-bold text-lg">Queue Admin</div>
-              </div>
-              
-              <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
-                  <button 
-                      onClick={() => setActiveTab('dashboard')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+        <ToastProvider>
+          <div className="flex h-screen w-screen bg-gray-100 overflow-hidden">
+              <div className="w-64 bg-gray-900 text-white flex flex-col shrink-0">
+                  <div 
+                    className="p-4 border-b border-gray-800 flex items-center gap-2 cursor-pointer hover:bg-gray-800 transition-colors"
+                    onClick={() => {
+                        if (window.confirm('确定要退出登录吗?')) {
+                            setIsLoggedIn(false);
+                        }
+                    }}
                   >
-                      <BarChart3 size={20} />
-                      <span>数据概览 (Dashboard)</span>
-                  </button>
-                  
-                  <div className="pt-4 pb-2 px-3 text-xs font-bold text-gray-500 uppercase tracking-wider">运营操作</div>
-                  
-                  <button 
-                      onClick={() => setActiveTab('query')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'query' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <Search size={20} />
-                      <span>队列操作</span>
-                  </button>
-                  <button 
-                      onClick={() => setActiveTab('logs')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <FileText size={20} />
-                      <span>日志审计</span>
-                  </button>
-
-                  <div className="pt-4 pb-2 px-3 text-xs font-bold text-gray-500 uppercase tracking-wider">系统配置</div>
-
-                  <button 
-                      onClick={() => setActiveTab('design')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'design' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <Layout size={20} />
-                      <span>大屏预案设计</span>
-                  </button>
-                  <button 
-                      onClick={() => setActiveTab('rules')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'rules' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <GitBranch size={20} />
-                      <span>分诊规则配置</span>
-                  </button>
-                  <button 
-                      onClick={() => setActiveTab('devices')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'devices' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <Monitor size={20} />
-                      <span>终端设备管理</span>
-                  </button>
-                  <button 
-                      onClick={() => setActiveTab('settings')}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
-                  >
-                      <Settings size={20} />
-                      <span>系统全局设置</span>
-                  </button>
-              </nav>
-
-              <div className="p-4 border-t border-gray-800 text-xs text-gray-500">
-                  <div className="flex items-center gap-2 mb-2">
-                      <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-gray-500"}`}></div>
-                      {isConnected ? "API Connected" : "Local Mode"}
+                      <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold">Q</div>
+                      <div className="font-bold text-lg">Queue Admin</div>
+                      <LogOut size={16} className="ml-auto text-gray-500 hover:text-white" />
                   </div>
-                  v1.1.0
+                  
+                  <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
+                      <button 
+                          onClick={() => setActiveTab('dashboard')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <BarChart3 size={20} />
+                          <span>数据概览 (Dashboard)</span>
+                      </button>
+                      
+                      <div className="pt-4 pb-2 px-3 text-xs font-bold text-gray-500 uppercase tracking-wider">运营操作</div>
+                      
+                      <button 
+                          onClick={() => setActiveTab('query')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'query' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <Search size={20} />
+                          <span>队列操作</span>
+                      </button>
+                      <button 
+                          onClick={() => setActiveTab('logs')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <FileText size={20} />
+                          <span>日志审计</span>
+                      </button>
+
+                      <div className="pt-4 pb-2 px-3 text-xs font-bold text-gray-500 uppercase tracking-wider">系统配置</div>
+
+                      <button 
+                          onClick={() => setActiveTab('design')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'design' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <Layout size={20} />
+                          <span>大屏预案设计</span>
+                      </button>
+                      <button 
+                          onClick={() => setActiveTab('rules')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'rules' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <GitBranch size={20} />
+                          <span>分诊规则配置</span>
+                      </button>
+                      <button 
+                          onClick={() => setActiveTab('devices')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'devices' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <Monitor size={20} />
+                          <span>终端设备管理</span>
+                      </button>
+                      <button 
+                          onClick={() => setActiveTab('settings')}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}
+                      >
+                          <Settings size={20} />
+                          <span>系统全局设置</span>
+                      </button>
+                  </nav>
+
+                  <div className="p-4 border-t border-gray-800 text-xs text-gray-500">
+                      <div className="flex items-center gap-2 mb-2">
+                          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-gray-500"}`}></div>
+                          {isConnected ? "API Connected" : "Local Mode"}
+                      </div>
+                      v1.1.0
+                  </div>
+              </div>
+
+              <div className="flex-1 overflow-auto relative">
+                  {activeTab === 'dashboard' && <Dashboard isConnected={isConnected} />}
+                  {activeTab === 'design' && <ConfigPanel config={config} onUpdateConfig={setConfig} isConnected={isConnected} />}
+                  {activeTab === 'devices' && <DeviceManager devices={devices} presets={presets} onUpdateDevices={setDevices} isConnected={isConnected} />}
+                  {activeTab === 'settings' && <SystemSettings settings={globalSettings} onUpdate={setGlobalSettings} isConnected={isConnected} />}
+                  {activeTab === 'query' && <PatientQuery config={config} onUpdateConfig={setConfig} isConnected={isConnected} />}
+                  {activeTab === 'logs' && <AuditLogViewer />}
+                  {activeTab === 'rules' && <RuleSettings />}
               </div>
           </div>
+        </ToastProvider>
+      );
+  };
 
-          <div className="flex-1 overflow-auto relative">
-              {activeTab === 'dashboard' && <Dashboard isConnected={isConnected} />}
-              {activeTab === 'design' && <ConfigPanel config={config} onUpdateConfig={setConfig} isConnected={isConnected} />}
-              {activeTab === 'devices' && <DeviceManager devices={devices} presets={presets} onUpdateDevices={setDevices} isConnected={isConnected} />}
-              {activeTab === 'settings' && <SystemSettings settings={globalSettings} onUpdate={setGlobalSettings} isConnected={isConnected} />}
-              {activeTab === 'query' && <PatientQuery config={config} onUpdateConfig={setConfig} isConnected={isConnected} />}
-              {activeTab === 'logs' && <AuditLogViewer />}
-              {activeTab === 'rules' && <RuleSettings />}
-          </div>
-      </div>
-    </ToastProvider>
+  return (
+    <ErrorBoundary>
+      {renderContent()}
+    </ErrorBoundary>
   );
 };
 

@@ -30,8 +30,10 @@ const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
   const loadFiles = async () => {
     if (!isConnected) {
         // Local Mode: Load from localStorage simulation
-        const local = localStorage.getItem('pqms_local_media');
-        if (local) setFiles(JSON.parse(local));
+        try {
+            const local = localStorage.getItem('pqms_local_media');
+            if (local) setFiles(JSON.parse(local));
+        } catch(e) { console.warn("Local media read failed", e); }
         return;
     }
 

@@ -33,6 +33,26 @@
         100% { transform: translateX(-100%); }
       }
     </style>
+    <script>
+      // Global Error Handler for Preview Environment
+      window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Global Error Caught:", message, error);
+        var root = document.getElementById('root');
+        // Only show if root is empty (app failed to mount)
+        if (root && (!root.hasChildNodes() || root.innerHTML === '')) {
+            var errorDiv = document.createElement('div');
+            errorDiv.style.padding = '20px';
+            errorDiv.style.color = 'red';
+            errorDiv.style.backgroundColor = '#ffe6e6';
+            errorDiv.style.border = '1px solid red';
+            errorDiv.style.margin = '20px';
+            errorDiv.style.borderRadius = '5px';
+            errorDiv.style.fontFamily = 'monospace';
+            errorDiv.innerHTML = '<strong>Application Error:</strong><br/>' + message;
+            document.body.appendChild(errorDiv);
+        }
+      };
+    </script>
   <script type="importmap">
 {
   "imports": {
@@ -47,5 +67,7 @@
 </head>
   <body>
     <div id="root"></div>
+    <!-- Explicitly load the React Entry Point -->
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

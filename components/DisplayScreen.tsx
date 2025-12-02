@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
 import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
@@ -15,6 +12,11 @@ const useMediaQuery = (query: string) => {
   const [matches, setMatches] = useState(false);
 
   useEffect(() => {
+    // Safety check for environment
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+        return;
+    }
+
     const media = window.matchMedia(query);
     if (media.matches !== matches) {
       setMatches(media.matches);
@@ -29,9 +31,18 @@ const useMediaQuery = (query: string) => {
 
 const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
-  // Default speech to DEFAULT_CONFIG.speech to prevent undefined access if config is partial
-  const { theme, layout, header, system, speech = DEFAULT_CONFIG.speech } = config;
   
+  // --- SAFETY FALLBACKS ---
+  // Ensure we always have valid objects even if API sends partial data
+  const theme = config.theme || DEFAULT_CONFIG.theme;
+  const layout = config.layout || DEFAULT_CONFIG.layout;
+  const header = config.header || DEFAULT_CONFIG.header;
+  const system = config.system || DEFAULT_CONFIG.system;
+  const speech = config.speech || DEFAULT_CONFIG.speech;
+  const currentPatient = config.currentPatient || DEFAULT_CONFIG.currentPatient;
+  const waitingList = config.waitingList || [];
+  const passedList = config.passedList || [];
+
   // Responsive Check: TV/Desktop vs Mobile/Tablet
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
@@ -50,16 +61,23 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
   // --- Optimization Logic: Detect if current layout is Static Text Only ---
   const isStaticOnly = useMemo(() => {
-    // Check all 4 zones
+    // Check all 4 zones safely
     const zones = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
     const hasDynamicContent = zones.some(z => 
+       z && (
        z.type === 'waiting-list' || 
        z.type === 'current-call' || 
-       z.type === 'window-info' || // Often contains dynamic window number
+       z.type === 'window-info' || 
        z.type === 'passed-list'
+       )
     );
     return !hasDynamicContent;
-  }, [layout.topLeft.type, layout.topRight.type, layout.bottomLeft.type, layout.bottomRight.type]);
+  }, [
+      layout.topLeft?.type, 
+      layout.topRight?.type, 
+      layout.bottomLeft?.type, 
+      layout.bottomRight?.type
+  ]);
 
   const pollingStatus = useMemo(() => {
      if (config.dataSource?.pollingStrategy === 'smart' && isStaticOnly) {
@@ -98,9 +116,12 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
   // --- Speech Synthesis Logic ---
   useEffect(() => {
-    if (!speech?.enabled || !config.currentPatient.id) return;
+    // Security check: If device is not registered, DO NOT SPEAK.
+    if (!system?.isRegistered) return;
 
-    const p = config.currentPatient;
+    if (!speech?.enabled || !currentPatient.id) return;
+
+    const p = currentPatient;
     const last = lastCalledRef.current;
     
     // Helper to normalize timestamp to number
@@ -146,20 +167,24 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       speak(textToSpeak);
     }
-  }, [config.currentPatient, speech, config.windowName, config.windowNumber]);
+  }, [currentPatient, speech, config.windowName, config.windowNumber, system?.isRegistered]);
 
   const speak = (text: string) => {
-    // Basic browser TTS
-    if ('speechSynthesis' in window) {
-      // Note: Browsers automatically queue calls to speak()
-      const utterance = new SpeechSynthesisUtterance(text);
-      // Ensure speech object properties are accessed safely
-      utterance.volume = speech?.volume || 1; 
-      utterance.rate = speech?.rate || 1;
-      utterance.pitch = speech?.pitch || 1;
-      utterance.lang = 'zh-CN';
-      
-      window.speechSynthesis.speak(utterance);
+    try {
+        // Basic browser TTS check
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            // Note: Browsers automatically queue calls to speak()
+            const utterance = new SpeechSynthesisUtterance(text);
+            // Ensure speech object properties are accessed safely
+            utterance.volume = speech?.volume || 1; 
+            utterance.rate = speech?.rate || 1;
+            utterance.pitch = speech?.pitch || 1;
+            utterance.lang = 'zh-CN';
+            
+            window.speechSynthesis.speak(utterance);
+        }
+    } catch (e) {
+        console.warn("Speech synthesis failed (likely browser restriction):", e);
     }
   };
 
@@ -233,7 +258,8 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
   // --- Component Factory ---
   const renderZoneContent = (zoneConfig: ZoneConfig) => {
-    if (zoneConfig.type === 'hidden') return null;
+    // Safety check
+    if (!zoneConfig || zoneConfig.type === 'hidden') return null;
 
     // Common Wrapper Style
     const wrapperClass = "w-full h-full shadow-lg relative overflow-hidden flex flex-col";
@@ -289,11 +315,11 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                 
                 <div className="flex flex-col md:flex-row items-center gap-4 text-center">
                    <div className="font-bold" style={{ fontSize: `${zoneConfig.currentNameFontSize || 60}px` }}>
-                      {config.currentPatient.name}
+                      {currentPatient.name}
                    </div>
                    {config.showQueueNumber && config.queueNumberStyle === 'none' && (
                      <div className="font-bold text-teal-200" style={{ fontSize: `${zoneConfig.currentNumberFontSize || 40}px` }}>
-                        {config.currentPatient.number}
+                        {currentPatient.number}
                      </div>
                    )}
                 </div>
@@ -302,7 +328,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                     config.queueNumberStyle === 'circle' ? 'rounded-full' : 
                     config.queueNumberStyle === 'square' ? 'rounded-none' : 'rounded-lg'
                   }`} style={{ fontSize: `${zoneConfig.currentNumberFontSize || 36}px` }}>
-                    {config.currentPatient.number}
+                    {currentPatient.number}
                   </div>
                 )}
              </div>
@@ -311,16 +337,16 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       case 'waiting-list':
         // Determine list content based on mode
-        let displayList: (Patient & { isPassed?: boolean, isCurrent?: boolean })[] = [...config.waitingList];
+        let displayList: (Patient & { isPassed?: boolean, isCurrent?: boolean })[] = [...waitingList];
         
         // --- Merge Current Patient Logic ---
-        if (zoneConfig.includeCurrent && config.currentPatient && config.currentPatient.id) {
-           displayList = [{ ...config.currentPatient, isCurrent: true }, ...displayList];
+        if (zoneConfig.includeCurrent && currentPatient && currentPatient.id) {
+           displayList = [{ ...currentPatient, isCurrent: true }, ...displayList];
         }
 
         // --- Merge Passed Patient Logic ---
         if (config.passedDisplayMode === 'wait-list-end') {
-          const passedPatients = config.passedList.map(p => ({ ...p, isPassed: true }));
+          const passedPatients = passedList.map(p => ({ ...p, isPassed: true }));
           displayList = [...displayList, ...passedPatients];
         }
 
@@ -397,7 +423,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       case 'passed-list':
         const passLimit = (zoneConfig.gridColumns || 1) * (zoneConfig.gridRows || 3);
-        const visiblePassed = config.passedList.slice(0, passLimit);
+        const visiblePassed = passedList.slice(0, passLimit);
 
         return (
           <div className={wrapperClass} style={wrapperStyle}>
@@ -481,8 +507,8 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   };
 
   // Layout Logic Vars
-  const hasLeft = layout.topLeft.type !== 'hidden' || layout.bottomLeft.type !== 'hidden';
-  const hasRight = layout.topRight.type !== 'hidden' || layout.bottomRight.type !== 'hidden';
+  const hasLeft = layout.topLeft?.type !== 'hidden' || layout.bottomLeft?.type !== 'hidden';
+  const hasRight = layout.topRight?.type !== 'hidden' || layout.bottomRight?.type !== 'hidden';
   
   // Calculate final widths based on visibility and screen size
   // If Portrait/Mobile: Width is 100%
@@ -497,8 +523,8 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
   // --- Footer Text Logic ---
   let footerHtml = layout.footerText;
-  if (config.passedDisplayMode === 'footer' && config.passedList.length > 0) {
-    const passedNames = config.passedList.map(p => `${p.name}(${p.number})`).join('，');
+  if (config.passedDisplayMode === 'footer' && passedList.length > 0) {
+    const passedNames = passedList.map(p => `${p.name}(${p.number})`).join('，');
     const passedHtml = `<span style="margin-left: 40px; color: #fbbf24; font-weight: bold;">[过号患者]：</span><span style="color: #fff;">${passedNames}</span>`;
     footerHtml += passedHtml;
   }
@@ -616,10 +642,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
           >
             
             {/* Top Left */}
-            {layout.topLeft.type !== 'hidden' && (
+            {layout.topLeft?.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomLeft.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%`,
+                  flex: layout.bottomLeft?.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%`,
                   overflow: 'hidden',
                   minHeight: 0
                 }}
@@ -629,10 +655,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             )}
 
             {/* Bottom Left */}
-            {layout.bottomLeft.type !== 'hidden' && (
+            {layout.bottomLeft?.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topLeft.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%`,
+                   flex: layout.topLeft?.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%`,
                    overflow: 'hidden',
                    minHeight: 0
                  }}
@@ -656,10 +682,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
           >
             
              {/* Top Right */}
-             {layout.topRight.type !== 'hidden' && (
+             {layout.topRight?.type !== 'hidden' && (
               <div 
                 style={{ 
-                  flex: layout.bottomRight.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%`,
+                  flex: layout.bottomRight?.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%`,
                   overflow: 'hidden',
                   minHeight: 0
                 }}
@@ -669,10 +695,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             )}
 
             {/* Bottom Right */}
-            {layout.bottomRight.type !== 'hidden' && (
+            {layout.bottomRight?.type !== 'hidden' && (
               <div 
                  style={{ 
-                   flex: layout.topRight.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%`,
+                   flex: layout.topRight?.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%`,
                    overflow: 'hidden',
                    minHeight: 0
                  }}

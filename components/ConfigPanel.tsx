@@ -9,6 +9,7 @@ import {
   Grid, Trash2, AlertTriangle, Check, CloudLightning, CloudOff, X, Maximize, Lock, Copy, Video, Image
 } from 'lucide-react';
 import { useToast } from './ToastProvider';
+import { DEFAULT_CONFIG } from '../constants';
 
 interface ConfigPanelProps {
   config: QueueConfig;
@@ -69,14 +70,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.4);
 
+  // Safe layout access
+  const safeLayout = config.layout || DEFAULT_CONFIG.layout;
+  const isLandscape = safeLayout.orientation === 'landscape';
+
   useEffect(() => {
     const calculateScale = () => {
         if (previewContainerRef.current) {
             const containerW = previewContainerRef.current.offsetWidth;
             const containerH = previewContainerRef.current.offsetHeight;
             
-            const targetW = config.layout.orientation === 'landscape' ? 1920 : 1080;
-            const targetH = config.layout.orientation === 'landscape' ? 1080 : 1920;
+            // Safe access inside effect as well
+            const currentOrientation = config.layout?.orientation || 'landscape';
+            const targetW = currentOrientation === 'landscape' ? 1920 : 1080;
+            const targetH = currentOrientation === 'landscape' ? 1080 : 1920;
             
             // Calculate ratios for both dimensions
             const scaleX = (containerW - 40) / targetW; // 40px padding
@@ -94,7 +101,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
         window.removeEventListener('resize', calculateScale);
         clearTimeout(timer);
     };
-  }, [config.layout.orientation, activeTab]); 
+  }, [config.layout?.orientation, activeTab]); 
 
 
   // Helper to update deep nested state
@@ -106,6 +113,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
     const newConfig = { ...config };
     let current: any = newConfig;
     for (let i = 0; i < path.length - 1; i++) {
+      if (!current[path[i]]) current[path[i]] = {}; // Create if missing
       current = current[path[i]];
     }
     current[path[path.length - 1]] = value;
@@ -160,10 +168,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                   toast.error('获取预案列表失败');
                });
          } else {
-             const saved = localStorage.getItem('pharmacy-queue-presets');
-             if (saved) {
-                const parsed = JSON.parse(saved);
-                setPresets(parsed.map((p: any) => ({ id: p.id, name: p.name })));
+             try {
+                const saved = localStorage.getItem('pharmacy-queue-presets');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    setPresets(parsed.map((p: any) => ({ id: p.id, name: p.name })));
+                }
+             } catch(e) {
+                 console.warn("LocalStorage read failed:", e);
              }
          }
      }
@@ -202,24 +214,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
         return;
     }
 
-    const saved = localStorage.getItem('pharmacy-queue-presets');
-    if (saved) {
-       const list = JSON.parse(saved);
-       const target = list.find((p: any) => p.id === id);
-       if (target) {
-          const loadedConfig = target.config;
-          loadedConfig.configVersion = `v${Date.now()}`;
-          if (loadedConfig.system) loadedConfig.system.isRegistered = true;
-          
-          updateConfig(loadedConfig);
-          // TRACK CURRENT PRESET
-          setCurrentPresetId(id);
-          setCurrentPresetName(target.name);
-          
-          setShowLoadModal(false);
-          toast.success('预案加载成功 (本地)');
-       }
-    }
+    try {
+        const saved = localStorage.getItem('pharmacy-queue-presets');
+        if (saved) {
+           const list = JSON.parse(saved);
+           const target = list.find((p: any) => p.id === id);
+           if (target) {
+              const loadedConfig = target.config;
+              loadedConfig.configVersion = `v${Date.now()}`;
+              if (loadedConfig.system) loadedConfig.system.isRegistered = true;
+              
+              updateConfig(loadedConfig);
+              // TRACK CURRENT PRESET
+              setCurrentPresetId(id);
+              setCurrentPresetName(target.name);
+              
+              setShowLoadModal(false);
+              toast.success('预案加载成功 (本地)');
+           }
+        }
+    } catch(e) { toast.error("本地读取失败"); }
   };
 
   // --- Delete Logic ---
@@ -254,18 +268,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
              toast.error(`删除失败: ${errMsg}`);
          }
      } else {
-         const saved = localStorage.getItem('pharmacy-queue-presets');
-         if (saved) {
-            const list = JSON.parse(saved);
-            const newList = list.filter((p: any) => p.id !== id);
-            localStorage.setItem('pharmacy-queue-presets', JSON.stringify(newList));
-            setPresets(newList);
-            if (currentPresetId === id) {
-                setCurrentPresetId(null);
-                setCurrentPresetName('');
-            }
-            toast.success('删除成功 (本地)');
-         }
+         try {
+             const saved = localStorage.getItem('pharmacy-queue-presets');
+             if (saved) {
+                const list = JSON.parse(saved);
+                const newList = list.filter((p: any) => p.id !== id);
+                localStorage.setItem('pharmacy-queue-presets', JSON.stringify(newList));
+                setPresets(newList);
+                if (currentPresetId === id) {
+                    setCurrentPresetId(null);
+                    setCurrentPresetName('');
+                }
+                toast.success('删除成功 (本地)');
+             }
+         } catch(e) { toast.error("本地删除失败"); }
      }
      setDeleteConfirmId(null);
   };
@@ -295,15 +311,17 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
       }
 
       // Local
-      const saved = localStorage.getItem('pharmacy-queue-presets');
-      let list = saved ? JSON.parse(saved) : [];
-      const idx = list.findIndex((p:any) => p.id === currentPresetId);
-      if (idx >= 0) {
-          list[idx].config = config;
-          list[idx].timestamp = Date.now();
-          localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
-          toast.success("更新成功 (本地)");
-      }
+      try {
+          const saved = localStorage.getItem('pharmacy-queue-presets');
+          let list = saved ? JSON.parse(saved) : [];
+          const idx = list.findIndex((p:any) => p.id === currentPresetId);
+          if (idx >= 0) {
+              list[idx].config = config;
+              list[idx].timestamp = Date.now();
+              localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
+              toast.success("更新成功 (本地)");
+          }
+      } catch(e) { toast.error("本地保存失败"); }
       setShowOverwriteModal(false);
   };
 
@@ -343,21 +361,23 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
       }
 
       // Local
-      const saved = localStorage.getItem('pharmacy-queue-presets');
-      const list = saved ? JSON.parse(saved) : [];
-      list.push(newPreset);
-      localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
-      toast.success("另存为成功 (本地)");
-      
-      setCurrentPresetId(newPresetId);
-      setCurrentPresetName(saveName);
-      setShowSaveAsModal(false);
+      try {
+          const saved = localStorage.getItem('pharmacy-queue-presets');
+          const list = saved ? JSON.parse(saved) : [];
+          list.push(newPreset);
+          localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
+          toast.success("另存为成功 (本地)");
+          
+          setCurrentPresetId(newPresetId);
+          setCurrentPresetName(saveName);
+          setShowSaveAsModal(false);
+      } catch(e) { toast.error("本地保存失败"); }
   }
 
 
   const renderZoneEditor = () => {
     // @ts-ignore
-    const zone: ZoneConfig = config.layout[selectedZone] || { type: 'hidden' };
+    const zone: ZoneConfig = config.layout?.[selectedZone] || { type: 'hidden' };
     const zoneKey = ['layout', selectedZone];
     const isList = zone.type === 'waiting-list' || zone.type === 'passed-list';
     const isWindow = zone.type === 'window-info';
@@ -628,7 +648,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
     );
   };
 
-  const isLandscape = config.layout.orientation === 'landscape';
   const previewWidth = isLandscape ? 1920 : 1080;
   const previewHeight = isLandscape ? 1080 : 1920;
 
@@ -720,23 +739,23 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                           <div className="flex gap-2">
                             <button 
                                onClick={() => handleUpdate(['layout', 'orientation'], 'landscape')}
-                               className={`flex-1 py-1.5 rounded text-xs border ${config.layout.orientation === 'landscape' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white'}`}
+                               className={`flex-1 py-1.5 rounded text-xs border ${safeLayout.orientation === 'landscape' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white'}`}
                             >
                                横屏 (16:9)
                             </button>
                             <button 
                                onClick={() => handleUpdate(['layout', 'orientation'], 'portrait')}
-                               className={`flex-1 py-1.5 rounded text-xs border ${config.layout.orientation === 'portrait' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white'}`}
+                               className={`flex-1 py-1.5 rounded text-xs border ${safeLayout.orientation === 'portrait' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white'}`}
                             >
                                竖屏 (9:16)
                             </button>
                           </div>
                         </div>
                         <div>
-                           <label className="block text-xs font-bold text-gray-500 mb-1">主分割比 ({config.layout.splitRatio}%)</label>
+                           <label className="block text-xs font-bold text-gray-500 mb-1">主分割比 ({safeLayout.splitRatio}%)</label>
                            <input 
                              type="range" min="20" max="80" 
-                             value={config.layout.splitRatio} 
+                             value={safeLayout.splitRatio} 
                              onChange={(e) => handleUpdate(['layout', 'splitRatio'], Number(e.target.value))}
                              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                            />
@@ -745,19 +764,19 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                     
                     <div className="grid grid-cols-2 gap-4 border-t pt-4">
                         <div>
-                           <label className="block text-xs font-bold text-gray-500 mb-1">左侧上下比 ({config.layout.leftSplitRatio ?? 50}%)</label>
+                           <label className="block text-xs font-bold text-gray-500 mb-1">左侧上下比 ({safeLayout.leftSplitRatio ?? 50}%)</label>
                            <input 
                             type="range" min="20" max="80" 
-                            value={config.layout.leftSplitRatio ?? 50} 
+                            value={safeLayout.leftSplitRatio ?? 50} 
                             onChange={(e) => handleUpdate(['layout', 'leftSplitRatio'], Number(e.target.value))}
                             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                           />
                         </div>
                         <div>
-                           <label className="block text-xs font-bold text-gray-500 mb-1">右侧上下比 ({config.layout.rightSplitRatio ?? 50}%)</label>
+                           <label className="block text-xs font-bold text-gray-500 mb-1">右侧上下比 ({safeLayout.rightSplitRatio ?? 50}%)</label>
                            <input 
                             type="range" min="20" max="80" 
-                            value={config.layout.rightSplitRatio ?? 50} 
+                            value={safeLayout.rightSplitRatio ?? 50} 
                             onChange={(e) => handleUpdate(['layout', 'rightSplitRatio'], Number(e.target.value))}
                             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                           />
@@ -768,7 +787,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                            <label className="block text-xs font-bold text-gray-500 mb-1">间距 (Gap)</label>
                            <input 
-                             type="number" value={config.layout.gap} 
+                             type="number" value={safeLayout.gap} 
                              onChange={(e) => handleUpdate(['layout', 'gap'], Number(e.target.value))}
                              className="w-full border p-1.5 rounded text-sm"
                            />
@@ -776,7 +795,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                            <label className="block text-xs font-bold text-gray-500 mb-1">内边距 (Padding)</label>
                            <input 
-                             type="number" value={config.layout.containerPadding} 
+                             type="number" value={safeLayout.containerPadding} 
                              onChange={(e) => handleUpdate(['layout', 'containerPadding'], Number(e.target.value))}
                              className="w-full border p-1.5 rounded text-sm"
                            />
@@ -788,11 +807,11 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                        <div className="flex items-center gap-3">
                            <input 
                              type="range" min="0" max="100" 
-                             value={config.layout.overscanPadding || 0} 
+                             value={safeLayout.overscanPadding || 0} 
                              onChange={(e) => handleUpdate(['layout', 'overscanPadding'], Number(e.target.value))}
                              className="flex-1 h-2 bg-orange-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
                            />
-                           <span className="text-xs font-mono font-bold text-orange-700">{config.layout.overscanPadding || 0}px</span>
+                           <span className="text-xs font-mono font-bold text-orange-700">{safeLayout.overscanPadding || 0}px</span>
                        </div>
                     </div>
                   </div>
@@ -804,7 +823,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <label className="text-sm font-bold text-gray-700">显示头部</label>
                         <input 
                           type="checkbox" 
-                          checked={config.header.show} 
+                          checked={config.header?.show ?? DEFAULT_CONFIG.header.show} 
                           onChange={(e) => handleUpdate(['header', 'show'], e.target.checked)}
                           className="accent-blue-600 w-5 h-5"
                         />
@@ -813,7 +832,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">主标题 (医院名称)</label>
                           <input 
-                            type="text" value={config.header.hospitalName} 
+                            type="text" value={config.header?.hospitalName || ''} 
                             onChange={(e) => handleUpdate(['header', 'hospitalName'], e.target.value)}
                             className="w-full border p-1.5 rounded text-sm"
                           />
@@ -821,7 +840,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                            <label className="block text-xs font-bold text-gray-600 mb-1">Logo 设置</label>
                            <select 
-                                value={config.header.logoType}
+                                value={config.header?.logoType || 'default'}
                                 onChange={(e) => handleUpdate(['header', 'logoType'], e.target.value)}
                                 className="w-full border p-1.5 rounded text-sm mb-2"
                            >
@@ -830,12 +849,12 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                                <option value="hidden">隐藏</option>
                            </select>
 
-                           {config.header.logoType === 'image' && (
+                           {config.header?.logoType === 'image' && (
                                <div className="flex gap-2 items-center">
                                    <div className="flex-1 relative">
                                        <input 
                                            type="text" 
-                                           value={config.header.logoUrl || ''} 
+                                           value={config.header?.logoUrl || ''} 
                                            onChange={(e) => handleUpdate(['header', 'logoUrl'], e.target.value)}
                                            placeholder="Logo URL"
                                            className="w-full border p-1.5 pl-7 rounded text-sm"
@@ -854,7 +873,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">副标题 (中间文本)</label>
                           <input 
-                            type="text" value={config.header.centerTitle} 
+                            type="text" value={config.header?.centerTitle || ''} 
                             onChange={(e) => handleUpdate(['header', 'centerTitle'], e.target.value)}
                             className="w-full border p-1.5 rounded text-sm"
                           />
@@ -862,7 +881,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">右侧内容</label>
                           <select 
-                            value={config.header.rightContentType}
+                            value={config.header?.rightContentType || 'time'}
                             onChange={(e) => handleUpdate(['header', 'rightContentType'], e.target.value)}
                             className="w-full border p-1.5 rounded text-sm"
                           >
@@ -928,52 +947,52 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.primary} 
+                                  value={config.theme?.primary || '#000000'} 
                                   onChange={(e) => handleUpdate(['theme', 'primary'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">主色调 (Primary)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.primary}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.primary}</div>
                                </div>
                             </div>
 
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.secondary} 
+                                  value={config.theme?.secondary || '#000000'} 
                                   onChange={(e) => handleUpdate(['theme', 'secondary'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">次色调 (Secondary)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.secondary}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.secondary}</div>
                                </div>
                             </div>
 
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.background} 
+                                  value={config.theme?.background || '#ffffff'} 
                                   onChange={(e) => handleUpdate(['theme', 'background'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">背景色 (Background)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.background}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.background}</div>
                                </div>
                             </div>
                             
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.textOnPrimary} 
+                                  value={config.theme?.textOnPrimary || '#ffffff'} 
                                   onChange={(e) => handleUpdate(['theme', 'textOnPrimary'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">主色文字 (Text On Primary)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.textOnPrimary}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.textOnPrimary}</div>
                                </div>
                             </div>
 
@@ -983,26 +1002,26 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.cardBackground || '#ffffff'} 
+                                  value={config.theme?.cardBackground || '#ffffff'} 
                                   onChange={(e) => handleUpdate(['theme', 'cardBackground'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">卡片背景色 (Card BG)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.cardBackground || '#ffffff'}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.cardBackground || '#ffffff'}</div>
                                </div>
                             </div>
 
                             <div className="flex items-center gap-3">
                                <input 
                                   type="color" 
-                                  value={config.theme.textMain || '#111827'} 
+                                  value={config.theme?.textMain || '#111827'} 
                                   onChange={(e) => handleUpdate(['theme', 'textMain'], e.target.value)}
                                   className="h-9 w-9 rounded cursor-pointer border-0 p-0"
                                />
                                <div className="flex-1">
                                   <label className="block text-xs font-medium text-gray-700">内容文字色 (Main Text)</label>
-                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme.textMain || '#111827'}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase font-mono">{config.theme?.textMain || '#111827'}</div>
                                </div>
                             </div>
 

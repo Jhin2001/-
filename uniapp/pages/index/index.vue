@@ -1,34 +1,37 @@
 <template>
 	<view class="container">
 		<!-- 1. 配置向导 (Setup Wizard) - 仅在未配置时显示 -->
-		<view v-if="!isConfigured" class="setup-panel">
-			<view class="header">
-				<text class="logo-text">🏥</text>
-				<text class="title">药房排队大屏终端</text>
-				<text class="subtitle">Pharmacy Display Client</text>
-			</view>
-			
-			<view class="card">
-				<view class="info-row">
-					<text class="label">本级终端 ID:</text>
-					<text class="value highlight">{{deviceId}}</text>
+		<!-- 使用 scroll-view 包裹，防止小屏手机显示不全 -->
+		<scroll-view v-if="!isConfigured" scroll-y="true" class="scroll-container">
+			<view class="setup-panel">
+				<view class="header">
+					<text class="logo-text">🏥</text>
+					<text class="title">药房排队大屏终端</text>
+					<text class="subtitle">Pharmacy Display Client</text>
 				</view>
-				<text class="desc">请在后台“终端管理”中添加此 ID 以绑定窗口。</text>
+				
+				<view class="card">
+					<view class="info-row">
+						<text class="label">本级终端 ID:</text>
+						<text class="value highlight">{{deviceId}}</text>
+					</view>
+					<text class="desc">请在后台“终端管理”中添加此 ID 以绑定窗口。</text>
+				</view>
+				
+				<view class="card form-card">
+					<text class="label">前端网页地址 (Frontend URL):</text>
+					<input 
+						class="input" 
+						v-model="inputUrl" 
+						placeholder="例如 http://192.168.1.100:80" 
+						:adjust-position="true"
+					/>
+					<text class="desc">请输入 IIS 部署的 React 网站地址。\n(注意：不要填成 8081 的后端 API 地址)</text>
+				</view>
+				
+				<button class="btn-save" @click="saveConfig" hover-class="btn-hover">连接并启动</button>
 			</view>
-			
-			<view class="card form-card">
-				<text class="label">前端网页地址 (Frontend URL):</text>
-				<input 
-					class="input" 
-					v-model="inputUrl" 
-					placeholder="例如 http://192.168.1.100:80" 
-					:adjust-position="true"
-				/>
-				<text class="desc">请输入 IIS 部署的 React 网站地址。\n(注意：不要填成 8081 的后端 API 地址)</text>
-			</view>
-			
-			<button class="btn-save" @click="saveConfig" hover-class="btn-hover">连接并启动</button>
-		</view>
+		</scroll-view>
 
 		<!-- 2. 全屏 WebView - 配置完成后显示 -->
 		<block v-else>
@@ -98,11 +101,17 @@
 		},
 		methods: {
 			initDeviceId() {
-				let id = uni.getStorageSync('pqms_device_id');
+				let id = '';
+				try {
+					id = uni.getStorageSync('pqms_device_id');
+				} catch(e) { console.error(e); }
+
 				if (!id) {
 					const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
 					id = `TV-${randomStr}`;
-					uni.setStorageSync('pqms_device_id', id);
+					try {
+						uni.setStorageSync('pqms_device_id', id);
+					} catch(e) { console.error(e); }
 				}
 				this.deviceId = id;
 			},
@@ -114,7 +123,11 @@
 					return;
 				}
 
-				const storedUrl = uni.getStorageSync('pqms_server_url');
+				let storedUrl = '';
+				try {
+					storedUrl = uni.getStorageSync('pqms_server_url');
+				} catch(e) { console.error(e); }
+
 				if (storedUrl) {
 					console.log("Using stored URL:", storedUrl);
 					this.savedUrl = storedUrl;
@@ -180,20 +193,28 @@
 			
 			handleWebMessage(e) {
 				// 接收来自 React 的消息（预留）
-				// 如果 React 端检测到长时间无操作或数据异常，可以 postMessage 通知 UniApp 重启
 			},
 			
 			// --- 配置逻辑 ---
 			saveConfig() {
+				// FIX: 增加 trim 处理，去除前后空格
+				if (!this.inputUrl) return uni.showToast({ title: '请输入地址', icon: 'none' });
+				
 				let url = this.inputUrl.trim();
 				if (!url) return uni.showToast({ title: '请输入地址', icon: 'none' });
+				
 				if (!url.startsWith('http://') && !url.startsWith('https://')) {
 					url = 'http://' + url;
 				}
-				uni.setStorageSync('pqms_server_url', url);
-				this.savedUrl = url;
-				this.isConfigured = true;
-				uni.showToast({ title: '配置已保存', icon: 'success' });
+				
+				try {
+					uni.setStorageSync('pqms_server_url', url);
+					this.savedUrl = url;
+					this.isConfigured = true;
+					uni.showToast({ title: '配置已保存', icon: 'success' });
+				} catch(e) {
+					uni.showToast({ title: '保存失败: 存储受限', icon: 'none' });
+				}
 			},
 			handleSettingsClick() {
 				const isHardcoded = DEFAULT_SERVER_URL && DEFAULT_SERVER_URL.length > 0;
@@ -208,7 +229,9 @@
 					showCancel: !isHardcoded,
 					success: (res) => {
 						if (!isHardcoded && res.confirm) {
-							uni.removeStorageSync('pqms_server_url');
+							try {
+								uni.removeStorageSync('pqms_server_url');
+							} catch(e) {}
 							this.isConfigured = false;
 							this.inputUrl = this.savedUrl;
 						}
@@ -227,22 +250,37 @@
 		background-color: #1a1a1a;
 		color: #fff;
 	}
-	.setup-panel {
+	
+	/* 新增 Scroll Container 确保小屏可滚动 */
+	.scroll-container {
 		flex: 1;
+		height: 0; /* 配合 flex:1 确保内部滚动生效 */
+		width: 100%;
+	}
+
+	.setup-panel {
+		/* 改为 min-height，允许内容撑开 */
+		min-height: 100%;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 40px;
+		/* 减小内边距适配手机 */
+		padding: 20px;
+		box-sizing: border-box;
 	}
-	.header { text-align: center; margin-bottom: 40px; }
-	.logo-text { font-size: 60px; margin-bottom: 10px; display: block; }
-	.title { font-size: 32px; font-weight: bold; margin-bottom: 5px; display: block; }
+	
+	/* 调整头部间距 */
+	.header { text-align: center; margin-bottom: 20px; }
+	/* 减小字号适配手机 */
+	.logo-text { font-size: 48px; margin-bottom: 10px; display: block; }
+	.title { font-size: 24px; font-weight: bold; margin-bottom: 5px; display: block; }
+	
 	.subtitle { font-size: 16px; color: #888; }
 	.card { background-color: #333; border-radius: 12px; padding: 20px; width: 100%; max-width: 500px; margin-bottom: 20px; box-sizing: border-box; }
 	.info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 	.label { font-size: 16px; color: #aaa; margin-bottom: 8px; display: block; }
-	.value.highlight { font-size: 24px; color: #4cd964; font-weight: bold; font-family: monospace; }
+	.value.highlight { font-size: 24px; color: #4cd964; font-weight: bold; font-family: monospace; word-break: break-all; }
 	.desc { font-size: 12px; color: #666; margin-top: 5px; display: block; white-space: pre-line; line-height: 1.5; }
 	.form-card { background-color: #2a2a2a; border: 1px solid #444; }
 	.input { background-color: #000; color: #fff; border: 1px solid #555; padding: 15px; font-size: 18px; border-radius: 8px; margin-bottom: 10px; }
