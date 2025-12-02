@@ -26,6 +26,16 @@ const App: React.FC = () => {
   const [config, setConfig] = useState<QueueConfig>(DEFAULT_CONFIG);
   
   const [globalSettings, setGlobalSettings] = useState<GlobalSystemSettings>(() => {
+      // Check for reset flag in URL to clear localStorage cache
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('resetConfig') === 'true') {
+          console.log("Configuration reset triggered by URL parameter.");
+          localStorage.removeItem('pqms_settings');
+          // Clean up URL without reloading
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return DEFAULT_GLOBAL_SETTINGS;
+      }
+
       const saved = localStorage.getItem('pqms_settings');
       if (saved) {
           try {
