@@ -429,6 +429,28 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
             </div>
           </div>
         );
+
+      case 'video':
+        return (
+            <div className={wrapperClass} style={{ ...wrapperStyle, backgroundColor: '#000' }}>
+               {zoneConfig.videoUrl ? (
+                   <video
+                      src={zoneConfig.videoUrl}
+                      className="w-full h-full"
+                      style={{ objectFit: zoneConfig.videoFit || 'cover' }}
+                      autoPlay
+                      loop={zoneConfig.videoLoop !== false}
+                      muted={zoneConfig.videoMuted !== false}
+                      playsInline
+                      controls={false}
+                   />
+               ) : (
+                   <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+                      <p>未设置视频源</p>
+                   </div>
+               )}
+            </div>
+        );
       
       default:
         return null;

@@ -1,10 +1,9 @@
 
-
-
 import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
-import { Settings, Image, Key, Type, Database, Save, Check, Link, Activity, ExternalLink, AlertTriangle, CloudLightning, CloudOff } from 'lucide-react';
+import { Settings, Image, Key, Type, Database, Save, Check, Link, Activity, ExternalLink, AlertTriangle, CloudLightning, CloudOff, FolderOpen } from 'lucide-react';
 import api from '../services/api';
+import MediaLibraryModal from './MediaLibraryModal';
 
 interface SystemSettingsProps {
   settings: GlobalSystemSettings;
@@ -16,6 +15,9 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState('');
+  
+  // Media Modal
+  const [showMediaModal, setShowMediaModal] = useState(false);
 
   const handleChange = (key: keyof GlobalSystemSettings, value: any) => {
     onUpdate({ ...settings, [key]: value });
@@ -24,13 +26,34 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
     setTestMsg('');
   };
 
-  const handleSave = () => {
+  const handleMediaSelect = (url: string) => {
+      handleChange('loginBackgroundImage', url);
+      setShowMediaModal(false);
+  };
+
+  const handleSave = async () => {
     setSaveStatus('saving');
-    // Simulate API/LocalStorage save delay
-    setTimeout(() => {
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-    }, 500);
+    
+    // 1. Always save to LocalStorage so API URL persists across reloads (Critical for API connectivity)
+    try {
+        localStorage.setItem('pqms_settings', JSON.stringify(settings));
+    } catch (e) {
+        console.error("Failed to save settings to localStorage", e);
+    }
+
+    // 2. If connected, try to sync with Backend
+    if (isConnected) {
+        try {
+            await api.admin.saveSystemSettings(settings);
+        } catch (e) {
+            console.error("Failed to sync settings to server", e);
+            // We don't block the 'saved' status because local save was successful
+            // and local saving of the API URL is the primary function here.
+        }
+    }
+
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   const handleTestConnection = async () => {
@@ -221,6 +244,12 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
                         className="w-full border p-2 rounded"
                       />
                    </div>
+                   <button 
+                      onClick={() => setShowMediaModal(true)}
+                      className="bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-600 px-3 py-2 rounded text-xs whitespace-nowrap flex items-center gap-2"
+                   >
+                      <FolderOpen size={14} /> 选择图片
+                   </button>
                    <div 
                      className="w-16 h-10 bg-cover bg-center rounded border"
                      style={{ backgroundImage: `url(${settings.loginBackgroundImage})` }}
@@ -240,6 +269,15 @@ const SystemSettings: React.FC<SystemSettingsProps> = ({ settings, onUpdate, isC
            </div>
         </section>
       </div>
+      
+      {/* Media Library Modal */}
+      <MediaLibraryModal 
+          isOpen={showMediaModal}
+          onClose={() => setShowMediaModal(false)}
+          onSelect={handleMediaSelect}
+          allowedTypes="image"
+          isConnected={isConnected}
+      />
 
       {/* Floating Save Button */}
       <div className="fixed bottom-8 right-8 z-20">

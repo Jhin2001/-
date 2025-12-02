@@ -3,10 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { QueueConfig, PRESET_THEMES, ContentType, QueueNumberStyle, PassedDisplayMode, ZoneConfig } from '../types';
 import api from '../services/api';
 import DisplayScreen from './DisplayScreen'; // Import DisplayScreen for preview
+import MediaLibraryModal from './MediaLibraryModal';
 import { 
   Settings, Layout, Type, Palette, Mic, Database, 
   Save, FolderOpen, RefreshCw, Smartphone, Monitor,
-  Grid, Trash2, AlertTriangle, Check, CloudLightning, CloudOff, X, Maximize, Lock, Copy
+  Grid, Trash2, AlertTriangle, Check, CloudLightning, CloudOff, X, Maximize, Lock, Copy, Video, Image
 } from 'lucide-react';
 
 interface ConfigPanelProps {
@@ -36,6 +37,7 @@ const CONTENT_TYPES: { id: ContentType; label: string }[] = [
   { id: 'current-call', label: '当前叫号' },
   { id: 'waiting-list', label: '等待队列' },
   { id: 'passed-list', label: '过号队列' },
+  { id: 'video', label: '视频播放' },
   { id: 'static-text', label: '静态文本' },
   { id: 'hidden', label: '隐藏' },
 ];
@@ -55,6 +57,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   const [presets, setPresets] = useState<{id: string, name: string}[]>([]);
   const [saveName, setSaveName] = useState('');
   
+  // Media Library State
+  const [showMediaModal, setShowMediaModal] = useState(false);
+  const [mediaTarget, setMediaTarget] = useState<{ type: 'image'|'video', path: string[] } | null>(null);
+
   // Custom Delete Modal State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -105,6 +111,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
     updateConfig(newConfig);
   };
 
+  // Open Media Library
+  const openMediaLibrary = (type: 'image' | 'video', path: string[]) => {
+      setMediaTarget({ type, path });
+      setShowMediaModal(true);
+  };
+
+  const handleMediaSelect = (url: string) => {
+      if (mediaTarget) {
+          handleUpdate(mediaTarget.path, url);
+      }
+      setShowMediaModal(false);
+      setMediaTarget(null);
+  };
+
   // Keyboard Shortcut for Save (Ctrl+S) -> Triggers Update if ID exists, else Save As
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -151,7 +171,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   const handleLoadPreset = async (id: string) => {
     if (isConnected) {
         try {
-            const preset = await api.admin.getPreset(id);
+            // FIX: api.admin.getPreset defined to return QueueConfig, but it likely returns the Preset wrapper
+            // which contains config and name. We cast to any to avoid TS errors accessing .config and .name.
+            const preset = await api.admin.getPreset(id) as any;
             if (preset && preset.config) {
                 let configData = preset.config;
                 if (typeof configData === 'string') {
@@ -331,6 +353,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
     const isWindow = zone.type === 'window-info';
     const isCurrent = zone.type === 'current-call';
     const isStatic = zone.type === 'static-text';
+    const isVideo = zone.type === 'video';
 
     return (
       <div className="space-y-4 animate-in fade-in duration-300">
@@ -355,7 +378,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
 
         {zone.type !== 'hidden' && (
           <>
-            {!isWindow && !isStatic && !isCurrent && (
+            {!isWindow && !isStatic && !isCurrent && !isVideo && (
               <div className="grid grid-cols-2 gap-4">
                  <div>
                     <label className="text-xs text-gray-500">标题文本</label>
@@ -446,6 +469,73 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                 )}
               </div>
             )}
+
+           {isVideo && (
+             <div className="space-y-3 pt-2 border-t border-dashed">
+                <div>
+                   <label className="block text-xs font-bold text-gray-600 mb-1">视频地址 (Video URL)</label>
+                   <div className="flex items-center gap-2">
+                      <div className="flex-1 relative">
+                         <input 
+                            type="text" 
+                            value={zone.videoUrl || ''} 
+                            onChange={(e) => handleUpdate([...zoneKey, 'videoUrl'], e.target.value)}
+                            className="w-full border p-1.5 pl-7 rounded text-sm"
+                            placeholder="http://example.com/video.mp4"
+                         />
+                         <Video size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"/>
+                      </div>
+                      <button 
+                         onClick={() => openMediaLibrary('video', [...zoneKey, 'videoUrl'])}
+                         className="bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-600 px-2 py-1.5 rounded text-xs whitespace-nowrap"
+                         title="从媒体库选择"
+                      >
+                         <FolderOpen size={14} />
+                      </button>
+                   </div>
+                   <p className="text-[10px] text-gray-400 mt-1">支持 .mp4, .webm 格式链接</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="flex justify-between items-center border p-2 rounded bg-gray-50">
+                      <label className="text-xs text-gray-600">默认静音</label>
+                      <input 
+                         type="checkbox" 
+                         checked={zone.videoMuted !== false} 
+                         onChange={(e) => handleUpdate([...zoneKey, 'videoMuted'], e.target.checked)}
+                         className="accent-blue-600"
+                      />
+                   </div>
+                   <div className="flex justify-between items-center border p-2 rounded bg-gray-50">
+                      <label className="text-xs text-gray-600">循环播放</label>
+                      <input 
+                         type="checkbox" 
+                         checked={zone.videoLoop !== false} 
+                         onChange={(e) => handleUpdate([...zoneKey, 'videoLoop'], e.target.checked)}
+                         className="accent-blue-600"
+                      />
+                   </div>
+                </div>
+                
+                <div className="p-2 bg-yellow-50 border border-yellow-100 rounded text-[10px] text-yellow-700">
+                    <AlertTriangle size={12} className="inline mr-1" />
+                    注意：浏览器通常会阻止自动播放带声音的视频。为了确保自动播放生效，建议勾选“默认静音”。
+                </div>
+
+                <div>
+                   <label className="block text-xs text-gray-500 mb-1">填充模式 (Object Fit)</label>
+                   <select 
+                      value={zone.videoFit || 'cover'}
+                      onChange={(e) => handleUpdate([...zoneKey, 'videoFit'], e.target.value)}
+                      className="w-full border p-1.5 rounded text-sm"
+                   >
+                      <option value="cover">覆盖填充 (Cover) - 裁剪多余</option>
+                      <option value="contain">完整显示 (Contain) - 留黑边</option>
+                      <option value="fill">拉伸填充 (Fill) - 可能变形</option>
+                   </select>
+                </div>
+             </div>
+           )}
 
            {isWindow && (
              <div className="space-y-3 pt-2 border-t border-dashed">
@@ -719,6 +809,39 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                           />
                         </div>
                         <div>
+                           <label className="block text-xs font-bold text-gray-600 mb-1">Logo 设置</label>
+                           <select 
+                                value={config.header.logoType}
+                                onChange={(e) => handleUpdate(['header', 'logoType'], e.target.value)}
+                                className="w-full border p-1.5 rounded text-sm mb-2"
+                           >
+                               <option value="default">默认图标</option>
+                               <option value="image">自定义图片</option>
+                               <option value="hidden">隐藏</option>
+                           </select>
+
+                           {config.header.logoType === 'image' && (
+                               <div className="flex gap-2 items-center">
+                                   <div className="flex-1 relative">
+                                       <input 
+                                           type="text" 
+                                           value={config.header.logoUrl || ''} 
+                                           onChange={(e) => handleUpdate(['header', 'logoUrl'], e.target.value)}
+                                           placeholder="Logo URL"
+                                           className="w-full border p-1.5 pl-7 rounded text-sm"
+                                       />
+                                       <Image size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                   </div>
+                                   <button 
+                                      onClick={() => openMediaLibrary('image', ['header', 'logoUrl'])}
+                                      className="bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-600 px-2 py-1.5 rounded text-xs whitespace-nowrap"
+                                   >
+                                      <FolderOpen size={14} />
+                                   </button>
+                               </div>
+                           )}
+                        </div>
+                        <div>
                           <label className="block text-xs text-gray-500 mb-1">副标题 (中间文本)</label>
                           <input 
                             type="text" value={config.header.centerTitle} 
@@ -764,7 +887,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                       </div>
                    </div>
                 )}
-
+                
+                {/* ... other tabs (theme, voice, data) ... */}
+                {/* Keeping the rest of the file rendering logic which handles theme, voice, data tabs */}
                 {activeTab === 'theme' && (
                    <div className="space-y-4">
                       {/* Presets */}
@@ -859,7 +984,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                       </div>
                    </div>
                 )}
-
+                
+                {/* Voice Tab */}
                 {activeTab === 'voice' && (
                    <div className="space-y-4">
                       <div className="flex items-center gap-2 border-b pb-2">
@@ -1114,8 +1240,18 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           </div>
        </div>
 
-        {/* Load Modal */}
-        {showLoadModal && (
+       {/* Media Library Modal */}
+       <MediaLibraryModal 
+           isOpen={showMediaModal}
+           onClose={() => setShowMediaModal(false)}
+           onSelect={handleMediaSelect}
+           allowedTypes={mediaTarget?.type === 'video' ? 'video' : 'image'}
+           isConnected={isConnected}
+       />
+
+       {/* ... Other Modals ... */}
+       {/* (Keeping the modals as they were in the previous version) */}
+       {showLoadModal && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white p-6 rounded-xl shadow-2xl w-96 animate-in fade-in zoom-in-95 relative">
                     <button onClick={() => setShowLoadModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={18}/></button>
@@ -1142,7 +1278,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
             </div>
         )}
         
-        {/* Save As Modal */}
         {showSaveAsModal && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100]">
                 <div className="bg-white p-6 rounded-xl shadow-2xl w-96 animate-in zoom-in-95">
@@ -1176,7 +1311,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
             </div>
         )}
 
-        {/* Overwrite Confirmation Modal (NEW) */}
         {showOverwriteModal && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100]">
                 <div className="bg-white p-6 rounded-xl shadow-2xl w-80 animate-in zoom-in-95">
@@ -1209,7 +1343,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
             </div>
         )}
 
-        {/* Delete Confirmation Modal (Z-Index 100 to be on top of Load Modal) */}
         {deleteConfirmId && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100]">
                 <div className="bg-white p-6 rounded-xl shadow-2xl w-80 animate-in zoom-in-95">

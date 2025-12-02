@@ -1,7 +1,5 @@
 
-
-import { QueueConfig, Patient, GlobalSystemSettings, DeviceBinding } from '../types';
-import { DEFAULT_CONFIG } from '../constants';
+import { QueueConfig, Patient, GlobalSystemSettings, DeviceBinding, DashboardMetrics, AuditLog, QueueRule } from '../types';
 
 // Helper to get base URL dynamically
 const getBaseUrl = () => {
@@ -23,21 +21,42 @@ interface ApiResponse<T> {
   data: T;
 }
 
+// Media File Interface
+export interface MediaFile {
+    id: string;
+    name: string;
+    url: string;
+    type: 'image' | 'video';
+    size: number;
+    uploadTime: string;
+}
+
+// Custom Error Class
+export class ApiError extends Error {
+  code?: number;
+  constructor(message: string, code?: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+  }
+}
+
 /**
  * 统一 HTTP 请求封装
  */
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const baseUrl = getBaseUrl();
-  // Remove trailing slash if present in baseUrl, and leading slash in endpoint
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const cleanEndpoint = endpoint.replace(/^\/+/, '');
   const url = `${cleanBase}/${cleanEndpoint}`;
   
-  const defaultHeaders = {
-    'Content-Type': 'application/json',
-    // 如果有 Token 认证，可以在这里添加
+  const defaultHeaders: Record<string, string> = {
     // 'Authorization': `Bearer ${localStorage.getItem('token')}` 
   };
+
+  if (!(options.body instanceof FormData)) {
+      defaultHeaders['Content-Type'] = 'application/json';
+  }
 
   const config = {
     ...options,
@@ -48,47 +67,88 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   };
 
   // --- DEBUG LOGGING ---
-  console.log(`[API Request] ${config.method || 'GET'} ${url}`, config.body ? '(has body)' : '');
+  console.log(`[API Request] ${config.method || 'GET'} ${url}`, config.body instanceof FormData ? '(FormData)' : (config.body ? '(JSON body)' : ''));
 
   try {
     const response = await fetch(url, config);
 
-    // 处理 HTTP 错误状态
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`[API Error] ${response.status} ${url}`, errorBody);
-      // Throwing detailed error for caller to handle (e.g. 404)
-      throw new Error(`HTTP Error ${response.status}: ${errorBody || response.statusText}`);
+      throw new ApiError(`HTTP Error ${response.status}: ${errorBody || response.statusText}`, response.status);
     }
 
-    // FIX: Handle 204 No Content (Delete success with empty body)
     if (response.status === 204) {
         return {} as T;
     }
 
-    // 解析 JSON
     const text = await response.text();
     const result: ApiResponse<T> = text ? JSON.parse(text) : {};
 
-    // 处理业务错误码 (假设后端 0 或 200 为成功)
     if (result.code !== undefined && result.code !== 0 && result.code !== 200) {
-      throw new Error(result.message || 'Unknown Business Error');
+      throw new ApiError(result.message || 'Unknown Business Error', result.code);
     }
 
-    return result.data !== undefined ? result.data : (result as any);
-  } catch (error) {
+    if (result.data !== undefined) {
+      return result.data;
+    }
+    
+    throw new ApiError('Invalid API response: data field is missing');
+    
+  } catch (error: any) {
     console.error(`[API Exception] ${url}`, error);
-    // Re-throw to allow caller to handle connection errors
+    
+    if (error.message === 'Failed to fetch') {
+        const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+        const isHttps = url.startsWith('https');
+        
+        if (isLocalhost && isHttps) {
+             throw new ApiError('连接失败: 本地 HTTPS 证书可能未被信任，或 API 服务未启动。请尝试在浏览器中直接访问 API 地址。');
+        }
+    }
     throw error;
   }
 }
 
+// --- MOCK DATA GENERATORS (FOR OFFLINE/DEMO MODE) ---
+const generateMockDashboard = (): DashboardMetrics => {
+    return {
+        todayServed: 128,
+        waitingCount: 14,
+        avgWaitTimeMinutes: 12.5,
+        peakHour: "09:00 - 10:00",
+        windowPerformance: [
+            { windowNumber: "1", windowName: "西药窗", servedCount: 55, avgTime: 2.5 },
+            { windowNumber: "2", windowName: "中药窗", servedCount: 32, avgTime: 4.8 },
+            { windowNumber: "3", windowName: "综合窗", servedCount: 41, avgTime: 3.2 }
+        ],
+        trendData: [
+            { time: "08:00", count: 12 }, { time: "09:00", count: 45 },
+            { time: "10:00", count: 32 }, { time: "11:00", count: 22 },
+            { time: "12:00", count: 8 },  { time: "13:00", count: 15 },
+            { time: "14:00", count: 28 }, { time: "15:00", count: 35 }
+        ]
+    };
+};
+
+const generateMockLogs = (): AuditLog[] => {
+    const actions = ['CALL_NEXT', 'PASS', 'LOGIN', 'CONFIG_UPDATE'];
+    const logs: AuditLog[] = [];
+    for(let i=0; i<20; i++) {
+        logs.push({
+            id: `log-${i}`,
+            timestamp: new Date(Date.now() - i * 360000).toISOString(),
+            operator: i % 5 === 0 ? 'Device-01' : 'Admin',
+            action: actions[i % 4] as any,
+            details: `Executed operation ${i}`,
+            ipAddress: '192.168.1.' + (100 + i)
+        });
+    }
+    return logs;
+};
+
 export const api = {
-  // --- 系统基础接口 ---
   system: {
-    /**
-     * 健康检查 / 连接测试
-     */
     health: () => {
       return request<{
         status: string;
@@ -98,21 +158,10 @@ export const api = {
     }
   },
 
-  // --- 终端设备相关接口 ---
   device: {
-    /**
-     * 设备启动初始化：获取设备配置、绑定信息和 UI 预案
-     * @param deviceId 设备唯一标识
-     * @param ip (可选) 当前 IP
-     */
     getConfig: (deviceId: string, ip?: string) => {
-      // 这里的泛型 QueueConfig 代表期望后端返回的数据结构
       return request<QueueConfig>(`/device/${deviceId}/config?ip=${ip || ''}`);
     },
-
-    /**
-     * 发送心跳包：上报设备存活状态
-     */
     heartbeat: (deviceId: string, status: 'online' | 'error', details?: any) => {
       return request<void>('/device/heartbeat', {
         method: 'POST',
@@ -121,75 +170,46 @@ export const api = {
     }
   },
 
-  // --- 队列业务接口 ---
   queue: {
-    /**
-     * 获取当前队列快照 (用于轮询)
-     * @param windowNumber (可选) 如果是本地模式，只拉取特定窗口的数据
-     */
     getSnapshot: (windowNumber?: string) => {
       const query = windowNumber ? `?window=${windowNumber}` : '';
       return request<{
         currentPatient: Patient;
         waitingList: Patient[];
         passedList: Patient[];
-        version: string; //用于比对是否需要刷新 UI 配置
+        version: string; 
       }>(`/queue/snapshot${query}`);
     },
-
-    /**
-     * 叫号 / 顺呼下一位
-     */
     callNext: (windowNumber: string) => {
       return request<{ result: string; patient: Patient }>('/queue/call', {
         method: 'POST',
         body: JSON.stringify({ windowNumber, action: 'next' }),
       });
     },
-
-    /**
-     * 重呼当前患者
-     */
     recall: (patientId: string) => {
       return request<{ result: string }>('/queue/recall', {
         method: 'POST',
         body: JSON.stringify({ patientId }),
       });
     },
-
-    /**
-     * 过号操作
-     */
     pass: (patientId: string) => {
       return request<{ result: string }>('/queue/pass', {
         method: 'POST',
         body: JSON.stringify({ patientId }),
       });
     },
-    
-    /**
-     * 优先/置顶
-     */
     top: (patientId: string) => {
         return request<{ result: string }>('/queue/top', {
             method: 'POST',
             body: JSON.stringify({ patientId }),
         });
     },
-
-    /**
-     * 复位/重排 (Restore from passed to waiting)
-     */
     restore: (patientId: string) => {
       return request<{ result: string }>('/queue/restore', {
         method: 'POST',
         body: JSON.stringify({ patientId }),
       });
     },
-
-    /**
-     * 删除 (Delete)
-     */
     delete: (patientId: string) => {
       return request<{ result: string }>('/queue/delete', {
         method: 'POST',
@@ -198,98 +218,119 @@ export const api = {
     }
   },
 
-  // --- 管理后台接口 ---
   admin: {
-    /**
-     * 管理员登录
-     */
     login: (password: string) => {
       return request<{ token: string; user: any }>('/admin/login', {
         method: 'POST',
         body: JSON.stringify({ password }),
       });
     },
-
-    /**
-     * 获取系统全局配置 (从数据库)
-     */
     getSystemSettings: () => {
       return request<GlobalSystemSettings>('/admin/settings');
     },
-
-    /**
-     * 保存系统全局配置 (到数据库)
-     */
     saveSystemSettings: (settings: GlobalSystemSettings) => {
        return request<void>('/admin/settings', {
          method: 'POST',
          body: JSON.stringify(settings)
        });
     },
-
-    /**
-     * 获取所有设备列表
-     */
     getDevices: () => {
       return request<DeviceBinding[]>('/admin/devices');
     },
-
-    /**
-     * 保存/更新设备信息
-     */
     saveDevice: (device: DeviceBinding) => {
       return request<void>('/admin/device/save', {
         method: 'POST',
         body: JSON.stringify(device),
       });
     },
-
-    /**
-     * 删除设备
-     */
     deleteDevice: (deviceId: string) => {
       return request<void>(`/admin/device/${deviceId}`, {
         method: 'DELETE'
       });
     },
-
-    /**
-     * 获取所有预案摘要列表
-     */
     getPresets: () => {
       return request<{id: string, name: string}[]>('/admin/presets');
     },
-
-    /**
-     * 获取单个预案详情
-     */
     getPreset: (id: string) => {
-      return request<any>(`/admin/preset/${id}`);
+      return request<QueueConfig>(`/admin/preset/${id}`);
     },
-
-    /**
-     * 保存全局预案/配置
-     */
-    savePreset: (presetId: string, name: string, config: QueueConfig) => {
+    savePreset: (id: string, name: string, config: QueueConfig) => {
       return request<void>('/admin/preset/save', {
         method: 'POST',
-        // FIX: The backend C# model likely defines 'Config' as a string.
-        // We must stringify the config object to pass it as a JSON string.
-        body: JSON.stringify({ 
-            id: presetId, 
-            name, 
-            config: JSON.stringify(config) 
-        }),
+        body: JSON.stringify({ id, name, config: JSON.stringify(config) }),
       });
     },
-
-    /**
-     * 删除预案
-     */
-    deletePreset: (presetId: string) => {
-      return request<void>(`/admin/preset/${presetId}`, {
+    deletePreset: (id: string) => {
+      return request<void>(`/admin/preset/${id}`, {
         method: 'DELETE'
       });
+    },
+    getMediaFiles: () => {
+        return request<MediaFile[]>('/admin/media');
+    },
+    uploadFile: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return request<MediaFile>('/admin/upload', {
+            method: 'POST',
+            body: formData
+        });
+    },
+
+    // --- NEW ANALYTICS & RULES ENDPOINTS ---
+
+    getDashboardStats: async () => {
+        try {
+            return await request<DashboardMetrics>('/admin/dashboard');
+        } catch (e) {
+            console.warn("API Dashboard not available, using mock data");
+            return generateMockDashboard();
+        }
+    },
+
+    getLogs: async () => {
+        try {
+            return await request<AuditLog[]>('/admin/logs');
+        } catch (e) {
+            console.warn("API Logs not available, using mock data");
+            return generateMockLogs();
+        }
+    },
+
+    getRules: async () => {
+         try {
+            return await request<QueueRule[]>('/admin/rules');
+        } catch (e) {
+            const saved = localStorage.getItem('pqms_rules');
+            return saved ? JSON.parse(saved) : [];
+        }
+    },
+
+    saveRule: async (rule: QueueRule) => {
+         try {
+            return await request<void>('/admin/rules', { method: 'POST', body: JSON.stringify(rule) });
+        } catch (e) {
+            // Local fallback
+            const saved = localStorage.getItem('pqms_rules');
+            const rules: QueueRule[] = saved ? JSON.parse(saved) : [];
+            const idx = rules.findIndex(r => r.id === rule.id);
+            if (idx >= 0) rules[idx] = rule;
+            else rules.push(rule);
+            localStorage.setItem('pqms_rules', JSON.stringify(rules));
+        }
+    },
+
+    deleteRule: async (id: string) => {
+         try {
+            return await request<void>(`/admin/rules/${id}`, { method: 'DELETE' });
+        } catch (e) {
+            // Local fallback
+            const saved = localStorage.getItem('pqms_rules');
+            if(saved) {
+                const rules: QueueRule[] = JSON.parse(saved);
+                localStorage.setItem('pqms_rules', JSON.stringify(rules.filter(r => r.id !== id)));
+            }
+        }
     }
   }
 };

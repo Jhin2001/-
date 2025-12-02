@@ -17,7 +17,7 @@ export interface ThemeColors {
 }
 
 // Available types of content for any zone
-export type ContentType = 'window-info' | 'current-call' | 'waiting-list' | 'passed-list' | 'static-text' | 'hidden';
+export type ContentType = 'window-info' | 'current-call' | 'waiting-list' | 'passed-list' | 'static-text' | 'video' | 'hidden';
 
 export type QueueNumberStyle = 'circle' | 'rounded' | 'square' | 'none';
 
@@ -41,6 +41,12 @@ export interface ZoneConfig {
   staticTextSize?: number;
   staticBgColor?: string;
   staticTextColor?: string;
+
+  // Video Specific
+  videoUrl?: string;
+  videoMuted?: boolean; // Auto-play usually requires mute
+  videoLoop?: boolean;
+  videoFit?: 'contain' | 'cover' | 'fill'; // Object-fit style
 
   // Window Info Specific
   showWindowNumber?: boolean; // Toggle visibility of the number circle
@@ -225,6 +231,43 @@ export interface GlobalSystemSettings {
   apiBaseUrl: string; // e.g. http://localhost:5000/api/v1
   apiPort: number; // Legacy
   systemName: string;
+}
+
+// --- NEW TYPES FOR DASHBOARD, LOGS, RULES ---
+
+export interface DashboardMetrics {
+  todayServed: number;
+  waitingCount: number;
+  avgWaitTimeMinutes: number; // e.g. 15
+  peakHour: string; // e.g. "09:00 - 10:00"
+  windowPerformance: {
+    windowNumber: string;
+    windowName: string;
+    servedCount: number;
+    avgTime: number;
+  }[];
+  trendData: {
+    time: string; // "08:00"
+    count: number;
+  }[];
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  operator: string; // "Admin" or Device ID
+  action: 'LOGIN' | 'CALL_NEXT' | 'RECALL' | 'PASS' | 'CONFIG_UPDATE' | 'DEVICE_BIND' | 'SYSTEM_ERROR';
+  details: string;
+  ipAddress?: string;
+}
+
+export interface QueueRule {
+  id: string;
+  name: string;
+  prefix: string; // e.g. "A"
+  targetWindows: string[]; // e.g. ["1", "2"]
+  isVip: boolean; // If true, insert at front
+  priority: number; // Higher number = higher priority
 }
 
 export const PRESET_THEMES = {

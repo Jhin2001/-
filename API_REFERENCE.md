@@ -2,8 +2,8 @@
 
 # 药房排队叫号系统 (Pharmacy Queue System) - 后端 API 接口文档
 
-**版本**: v1.0.4  
-**日期**: 2025-05-20  
+**版本**: v1.1.0  
+**日期**: 2025-05-21  
 **适用端**: Android TV (UniApp), Web 管理后台, 呼叫器终端
 
 ---
@@ -204,7 +204,7 @@
 
 ## 5. 管理后台接口 (Admin API)
 
-**调用方**: Web 配置面板 (ConfigPanel)
+**调用方**: Web 配置面板 (ConfigPanel, Dashboard)
 
 ### 5.0 管理员登录
 *   **Method**: `POST`
@@ -221,20 +221,7 @@
 ### 5.1 获取所有设备
 *   **Method**: `GET`
 *   **Path**: `/admin/devices`
-*   **Response**:
-    ```json
-    {
-      "code": 200,
-      "data": [ 
-          { 
-              "id": "TV-01", 
-              "name": "设备1", 
-              "lastSeen": "2025-11-30 14:00:00.000",
-              "status": "online"
-          } 
-      ]
-    }
-    ```
+*   **Response**: `DeviceBinding[]`
 
 ### 5.2 保存/注册设备
 *   **Method**: `POST`
@@ -268,7 +255,6 @@
       "id": "preset_new",
       "name": "春节限定皮肤",
       "config": "{ ...Escaped JSON String... }" 
-      // 注意: 后端可能要求 config 字段是 JSON 字符串而不是对象
     }
     ```
 
@@ -286,7 +272,99 @@
 *   **Method**: `DELETE`
 *   **Path**: `/admin/preset/{id}`
 *   **Response**: `{ "code": 200 }`
-*   **逻辑说明**: 根据 ID 从数据库中物理删除该预案配置。
+
+### 5.10 获取仪表盘统计 (Dashboard)
+*   **Method**: `GET`
+*   **Path**: `/admin/dashboard`
+*   **Response**:
+    ```json
+    {
+        "code": 200,
+        "data": {
+            "todayServed": 128,
+            "waitingCount": 14,
+            "avgWaitTimeMinutes": 12.5,
+            "peakHour": "09:00 - 10:00",
+            "windowPerformance": [
+                { "windowNumber": "1", "windowName": "西药窗", "servedCount": 55, "avgTime": 2.5 }
+            ],
+            "trendData": [
+                { "time": "08:00", "count": 12 },
+                { "time": "09:00", "count": 45 }
+            ]
+        }
+    }
+    ```
+
+### 5.11 获取审计日志 (Audit Logs)
+*   **Method**: `GET`
+*   **Path**: `/admin/logs`
+*   **Response**:
+    ```json
+    {
+        "code": 200,
+        "data": [
+            {
+                "id": "log-1",
+                "timestamp": "2025-05-20 10:00:00",
+                "operator": "Admin",
+                "action": "LOGIN",
+                "details": "User logged in",
+                "ipAddress": "192.168.1.100"
+            }
+        ]
+    }
+    ```
+
+### 5.12 媒体库管理 (Media Library)
+用于上传背景图、Logo 或视频文件。
+
+*   **上传文件**:
+    *   **Method**: `POST`
+    *   **Path**: `/admin/upload`
+    *   **Content-Type**: `multipart/form-data`
+    *   **Body**: Form Data 包含 `file` 字段。
+    *   **Response**:
+        ```json
+        {
+           "code": 200,
+           "data": { "id": "m1", "name": "bg.jpg", "url": "http://.../uploads/bg.jpg", "type": "image" }
+        }
+        ```
+*   **获取文件列表**:
+    *   **Method**: `GET`
+    *   **Path**: `/admin/media`
+    *   **Response**: `MediaFile[]`
+
+### 5.13 分诊规则管理 (Queue Rules)
+用于配置号码前缀与窗口的绑定关系及 VIP 策略。
+
+*   **获取规则列表**:
+    *   **Method**: `GET`
+    *   **Path**: `/admin/rules`
+    *   **Response**:
+        ```json
+        {
+           "code": 200,
+           "data": [
+               {
+                   "id": "r1",
+                   "name": "西药常规",
+                   "prefix": "A",
+                   "targetWindows": ["1", "2"],
+                   "isVip": false,
+                   "priority": 0
+               }
+           ]
+        }
+        ```
+*   **保存规则 (Upsert)**:
+    *   **Method**: `POST`
+    *   **Path**: `/admin/rules`
+    *   **Body**: `QueueRule` 对象
+*   **删除规则**:
+    *   **Method**: `DELETE`
+    *   **Path**: `/admin/rules/{id}`
 
 ---
 

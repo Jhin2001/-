@@ -28,88 +28,48 @@
     npm run build
     ```
 4.  构建完成后，会在项目根目录下生成一个 `build` (或 `dist`) 文件夹。
-    *   这个文件夹包含了 `index.html` 以及 `static/` 目录。
+    *   这个文件夹包含了 `index.html`、`web.config` 以及 `static/` 目录。
     *   **这就是我们需要部署到 IIS 的全部内容。**
 
 ## 3. IIS 站点配置
 
-1.  **复制文件**: 将 `build` 文件夹中的所有内容复制到服务器上的某个目录，例如 `C:\inetpub\wwwroot\pharmacy-queue`。
+1.  **复制文件**: 将 `build` (或 `dist`) 文件夹中的所有内容复制到服务器上的某个目录，例如 `C:\inetpub\wwwroot\pharmacy-queue`。
+    *   *注意：确保 `web.config` 文件也在其中。*
 2.  **打开 IIS 管理器**: `Win + R` 输入 `inetmgr`。
 3.  **添加网站**:
     *   右键点击 "网站" -> "添加网站"。
     *   **网站名称**: PharmacyQueue (自定义)。
     *   **物理路径**: 选择步骤1中的文件夹路径 (例如 `C:\inetpub\wwwroot\pharmacy-queue`)。
-    *   **端口**: 设置一个未被占用的端口，例如 `8080` 或 `80`。
+    *   **端口**: 设置一个未被占用的端口，例如 `8080` (HTTP) 或 `443` (HTTPS)。
     *   点击 "确定"。
 
-## 4. 配置 web.config (解决 SPA 路由与 404 问题)
+## 4. 常见问题排查 (Troubleshooting)
 
-React 是单页应用 (SPA)，如果用户直接访问非根路径（例如刷新页面），IIS 会默认寻找对应的物理文件而导致 404 错误。我们需要配置 URL 重写规则，将所有非静态资源的请求都指向 `index.html`。
+### Q1: "localhost 发送了无效的响应" (ERR_SSL_PROTOCOL_ERROR)
+*   **现象**: 浏览器显示“此站点的连接不安全”或“发送了无效的响应”。
+*   **原因**: 协议不匹配。你可能正在尝试用 `https://` 访问一个只绑定了 HTTP 端口的 IIS 站点。
+    *   例如：IIS 绑定的是 `8080` (HTTP)，但你在浏览器输入了 `https://localhost:8080`。
+*   **解决**:
+    *   请使用 `http://` 访问（例如 `http://localhost:8080`）。
+    *   如果必须使用 HTTPS，请在 IIS 绑定设置中添加 HTTPS 绑定并选择有效的 SSL 证书。
 
-在部署目录（即 `C:\inetpub\wwwroot\pharmacy-queue`）下，创建一个名为 `web.config` 的文件，并粘贴以下内容：
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<configuration>
-  <system.webServer>
-    <!-- 
-      重要: 需要安装 IIS URL Rewrite 模块 
-      下载: https://www.iis.net/downloads/microsoft/url-rewrite
-    -->
-    <rewrite>
-      <rules>
-        <rule name="React Routes" stopProcessing="true">
-          <match url=".*" />
-          <conditions logicalGrouping="MatchAll">
-            <!-- 如果请求的是文件，则不重写 -->
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-            <!-- 如果请求的是目录，则不重写 -->
-            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
-            <!-- 如果请求的是 API 路径 (假设后端也在同域下)，则不重写 -->
-            <!-- 如果后端是独立域名，这一行可以去掉 -->
-            <add input="{REQUEST_URI}" pattern="^/(api)" negate="true" />
-          </conditions>
-          <!-- 所有其他请求重写到 index.html -->
-          <action type="Rewrite" url="/" />
-        </rule>
-      </rules>
-    </rewrite>
-
-    <!-- 配置 MIME 类型，确保 .json 等文件能正确加载 -->
-    <staticContent>
-        <remove fileExtension=".json" />
-        <mimeMap fileExtension=".json" mimeType="application/json" />
-        <remove fileExtension=".woff" />
-        <mimeMap fileExtension=".woff" mimeType="font/woff" />
-        <remove fileExtension=".woff2" />
-        <mimeMap fileExtension=".woff2" mimeType="font/woff2" />
-    </staticContent>
-  </system.webServer>
-</configuration>
-```
-
-## 5. 常见问题排查
-
-### Q1: 访问页面出现 HTTP 500.19 错误
+### Q2: 访问页面出现 HTTP 500.19 错误
 *   **原因**: 通常是因为没有安装 **URL Rewrite 模块**，但 `web.config` 中配置了 `<rewrite>` 节点。
 *   **解决**: 请下载并安装 [URL Rewrite Module](https://www.iis.net/downloads/microsoft/url-rewrite)，安装后需重启 IIS。
 
-### Q2: 页面能打开，但点击刷新后 404
-*   **原因**: `web.config` 文件缺失或配置不正确。
-*   **解决**: 确保 `web.config` 文件存在于网站根目录，并且内容如第4步所示。
+### Q3: 页面能打开，但点击刷新后 404
+*   **原因**: `web.config` 文件缺失。
+*   **解决**: 确保构建输出中包含了 `web.config` 文件，并且该文件位于网站根目录下。
 
-### Q3: 无法加载 .json 文件或字体图标
-*   **原因**: IIS 默认可能没有添加某些 MIME 类型。
-*   **解决**: `web.config` 中的 `<staticContent>` 部分已经处理了常见类型。如果仍有问题，可在 IIS 管理器中手动检查 "MIME 类型" 设置。
+### Q4: 权限问题 "Temporary ASP.NET Files"
+*   **错误信息**: `Current identity (IIS APPPOOL\xxx) does not have write access to 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Temporary ASP.NET Files'`
+*   **解决**:
+    1. 在 IIS 管理器中，点击左侧 **应用程序池**。
+    2. 双击你的网站对应的应用程序池。
+    3. 将 **.NET CLR 版本** 设置为 **无托管代码 (No Managed Code)**。
+    4. 确定并回收/重启应用程序池。
 
-### Q4: 权限问题 (访问被拒绝)
-*   **解决**: 确保 `IUSR` 或 `IIS_IUSRS` 用户组对物理文件夹 (`C:\inetpub\wwwroot\pharmacy-queue`) 拥有 **读取** 和 **执行** 权限。
+## 5. API 连接配置
 
-## 6. 与后端 API 的连接
-
-部署完成后，前端默认连接的 API 地址可能需要修改。
-1.  打开浏览器访问部署好的前端地址。
-2.  进入 **系统全局设置** (System Settings)。
-3.  修改 **后端 API 接口地址** 为实际的生产环境后端地址 (例如 `http://192.168.1.100:5000/api/v1`)。
-4.  点击保存。
-    *   *注意：此配置保存在浏览器 LocalStorage 或数据库中。如果更换浏览器访问，可能需要重新配置。*
+部署完成后，请务必在前端页面的 **系统设置** 中配置正确的后端 API 地址。
+*   如果在本地 IIS 部署且没有配置 SSL 证书，请确保 API 地址也是 `http://` 开头，或者如果是 `https://` 开头（如 IIS Express），请务必先在浏览器中单独访问 API 地址并信任证书。
