@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { DeviceBinding, Preset } from '../types';
-import { Monitor, Plus, Edit2, Trash2, Save, X, Activity, Wifi, CloudLightning, CloudOff, Server, ExternalLink } from 'lucide-react';
+import { Monitor, Plus, Edit2, Trash2, Save, X, CloudLightning, CloudOff, Server, ExternalLink, Hash } from 'lucide-react';
 import api from '../services/api';
 import { useToast } from './ToastProvider';
 import ConfirmModal from './ConfirmModal';
@@ -78,8 +79,10 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
   };
 
   const handleAddNew = () => {
+    // Use a temporary ID for the editing state, but form ID is empty for user input
+    const tempId = '__NEW_DEVICE__'; 
     const newDevice: DeviceBinding = {
-      id: Date.now().toString(),
+      id: '', // Empty initially, user must input
       name: '新设备',
       ipAddress: '',
       macAddress: '',
@@ -90,7 +93,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
       lastSeen: new Date().toISOString()
     };
     setEditForm(newDevice);
-    setEditingId(newDevice.id);
+    setEditingId(tempId);
   };
 
   const handleEdit = (device: DeviceBinding) => {
@@ -100,6 +103,12 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
 
   const handleSave = async () => {
     if (!editForm) return;
+
+    // Validation
+    if (!editForm.id.trim()) {
+        toast.error("设备 ID 不能为空");
+        return;
+    }
 
     if (isConnected) {
         try {
@@ -130,9 +139,14 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     // Local Fallback
     const exists = devices.find(d => d.id === editForm.id);
     let newDevices;
-    if (exists) {
+    if (exists && editingId !== '__NEW_DEVICE__') {
       newDevices = devices.map(d => d.id === editForm.id ? editForm : d);
     } else {
+      // Check if ID collision for new device
+      if (devices.find(d => d.id === editForm.id)) {
+          toast.error("设备 ID 已存在");
+          return;
+      }
       newDevices = [...devices, editForm];
     }
     
@@ -182,7 +196,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             终端窗口管理
           </h2>
           <div className="flex items-center gap-2 mt-1">
-             <p className="text-gray-500">配置电视终端(Android)的 IP/MAC 绑定及对应的显示预案。</p>
+             <p className="text-gray-500">配置电视终端(Android)的 ID 绑定及对应的显示预案。</p>
              {isConnected ? (
                 <span className="flex items-center gap-1 text-[10px] bg-green-100 text-green-700 px-2 rounded-full border border-green-200">
                     <CloudLightning size={10} /> API Connected
@@ -216,6 +230,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
           <thead className="bg-gray-50 border-b">
             <tr>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">状态</th>
+              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">设备 ID</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">设备名称</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">IP / MAC</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">绑定窗口</th>
@@ -224,10 +239,10 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {/* If adding new item that isn't in list yet */}
-            {editingId && !devices.find(d => d.id === editingId) && editForm && (
-               <tr className="bg-blue-50">
-                 {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets)}
+            {/* New Item Creation Row */}
+            {editingId === '__NEW_DEVICE__' && editForm && (
+               <tr className="bg-blue-50 animate-in fade-in">
+                 {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets, true)}
                </tr>
             )}
 
@@ -235,7 +250,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
               <React.Fragment key={device.id}>
                 {editingId === device.id && editForm ? (
                    <tr className="bg-blue-50">
-                     {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets)}
+                     {renderEditRow(editForm, setEditForm, handleSave, () => setEditingId(null), availablePresets, false)}
                    </tr>
                 ) : (
                   // ... read mode row ...
@@ -247,6 +262,9 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                           {getStatusConfig(device.status).label}
                         </span>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 font-mono font-bold text-gray-700">
+                        {device.id}
                     </td>
                     <td className="px-6 py-4 font-medium text-gray-900">
                         {device.id === 'SERVER_MONITOR' && <Server size={14} className="inline mr-1 text-purple-600"/>}
@@ -266,13 +284,13 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
-                      {/* NEW: Launch Button */}
+                      {/* Launch Button */}
                       <button 
                         onClick={() => handleLaunch(device.id)}
                         className="text-green-600 hover:bg-green-50 p-2 rounded flex items-center gap-1 text-xs font-bold border border-transparent hover:border-green-200"
                         title="在新窗口打开此终端画面"
                       >
-                        <ExternalLink size={16} /> 启动
+                        <ExternalLink size={16} />
                       </button>
 
                       <div className="h-4 w-px bg-gray-300 mx-1"></div>
@@ -296,7 +314,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
             ))}
             {devices.length === 0 && !editingId && (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
+                <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
                   暂无设备，请点击右上角新增
                 </td>
               </tr>
@@ -323,14 +341,34 @@ const renderEditRow = (
   setForm: React.Dispatch<React.SetStateAction<DeviceBinding | null>>,
   onSave: () => void,
   onCancel: () => void,
-  presets: {id: string, name: string}[]
+  presets: {id: string, name: string}[],
+  isNew: boolean
 ) => (
   <>
     <td className="px-6 py-4">
        <div className="flex items-center gap-2">
           <span className="flex h-2.5 w-2.5 rounded-full bg-yellow-500"></span>
-          <span className="text-xs text-gray-500">未注册</span>
+          <span className="text-xs text-gray-500">配置中</span>
        </div>
+    </td>
+    {/* Device ID Input - Only editable if New */}
+    <td className="px-6 py-4">
+      {isNew ? (
+          <div className="relative">
+             <Hash size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"/>
+             <input 
+                type="text" 
+                value={form.id}
+                onChange={(e) => setForm({...form, id: e.target.value})}
+                className="w-full border border-blue-300 bg-white p-1.5 pl-7 rounded text-sm font-bold font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="TV-XXXX"
+                autoFocus
+             />
+             <div className="text-[10px] text-blue-600 mt-1">请输入屏幕上显示的绿色ID</div>
+          </div>
+      ) : (
+          <span className="font-mono font-bold text-gray-500">{form.id}</span>
+      )}
     </td>
     <td className="px-6 py-4">
       <input 
@@ -363,7 +401,7 @@ const renderEditRow = (
         value={form.assignedWindowName}
         onChange={(e) => setForm({...form, assignedWindowName: e.target.value})}
         className="w-full border p-1 rounded text-sm font-bold"
-        placeholder="窗口名称 (e.g. 麻精窗)"
+        placeholder="窗口名称"
       />
       <input 
         type="text" 

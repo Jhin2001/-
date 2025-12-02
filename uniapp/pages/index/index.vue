@@ -15,6 +15,16 @@
 						<text class="label">本级终端 ID:</text>
 						<text class="value highlight">{{deviceId}}</text>
 					</view>
+					<!-- 新增：显示原生获取的真实 IP 和 MAC -->
+					<view class="info-row">
+						<text class="label">本机 IP:</text>
+						<text class="value">{{nativeIp}}</text>
+					</view>
+					<view class="info-row">
+						<text class="label">本机 MAC:</text>
+						<text class="value">{{nativeMac}}</text>
+					</view>
+
 					<text class="desc">请在后台“终端管理”中添加此 ID 以绑定窗口。</text>
 				</view>
 				
@@ -76,7 +86,9 @@
 				savedUrl: '',
 				webviewVisible: true, // 控制 WebView 显隐用于重载
 				isOnline: true,
-				retryCount: 0
+				retryCount: 0,
+				nativeIp: '0.0.0.0',
+				nativeMac: '00:00:00:00:00:00'
 			}
 		},
 		computed: {
@@ -84,11 +96,13 @@
 				if (!this.savedUrl) return '';
 				const base = this.savedUrl.replace(/\/+$/, '');
 				// 增加 timestamp 防止 WebView 缓存
-				return `${base}/?mode=tv&deviceId=${this.deviceId}&ts=${Date.now()}`;
+				// 同时将 IP 和 MAC 透传给 React 前端，方便其上报心跳
+				return `${base}/?mode=tv&deviceId=${this.deviceId}&ip=${this.nativeIp}&mac=${this.nativeMac}&ts=${Date.now()}`;
 			}
 		},
 		onLoad() {
 			this.initDeviceId();
+			this.getNativeNetworkInfo(); // 获取真实网络信息
 			this.initServerUrl();
 			this.setupCrashProtection();
 		},
@@ -115,6 +129,98 @@
 				}
 				this.deviceId = id;
 			},
+			
+			// --- Native.js 获取真实 IP 和 MAC (Android) ---
+			getNativeNetworkInfo() {
+				// #ifdef APP-PLUS
+				if (plus.os.name === 'Android') {
+					try {
+						console.log("Starting Native Network Info Fetch...");
+						
+						// 1. 获取 IPv4
+						let ip = "0.0.0.0";
+						const NetworkInterface = plus.android.importClass("java.net.NetworkInterface");
+						const Inet4Address = plus.android.importClass("java.net.Inet4Address");
+						const Collections = plus.android.importClass("java.util.Collections");
+						
+						const interfaces = NetworkInterface.getNetworkInterfaces();
+						const interfaceList = Collections.list(interfaces);
+						
+						// 遍历接口
+						for (let i = 0; i < interfaceList.size(); i++) {
+							const intf = interfaceList.get(i);
+							const name = intf.getName();
+							// console.log("Checking interface: " + name);
+							
+							// 忽略回环和未启动的接口，通常找 wlan0 (wifi) 或 eth0 (有线)
+							if (!intf.isLoopback() && intf.isUp()) {
+								const addrs = intf.getInetAddresses();
+								while (addrs.hasMoreElements()) {
+									const addr = addrs.nextElement();
+									// 仅获取 IPv4
+									if (plus.android.instanceOf(addr, Inet4Address)) {
+										const sAddr = addr.getHostAddress();
+										// 排除 127.0.0.1 (虽然 isLoopback 已经排除了，双重保险)
+										if (!sAddr.startsWith("127.")) {
+											ip = sAddr;
+											// 如果是有线 eth0，优先级最高，直接覆盖
+											if (name.indexOf("eth") !== -1) {
+												this.nativeIp = ip;
+												// 继续找 MAC
+											} else {
+												// 暂存 wlan0 的 IP，如果后面没有 eth0 就用这个
+												this.nativeIp = ip;
+											}
+										}
+									}
+								}
+							}
+						}
+
+						// 2. 获取 MAC 地址 (绕过 Android 10+ 限制，读取系统文件)
+						// 标准 API 在 Android 10+ 返回 02:00:00:00:00:00
+						let mac = "";
+						const File = plus.android.importClass("java.io.File");
+						const FileReader = plus.android.importClass("java.io.FileReader");
+						const BufferedReader = plus.android.importClass("java.io.BufferedReader");
+
+						const readMacFile = (path) => {
+							try {
+								const file = new File(path);
+								if (file.exists()) {
+									const reader = new FileReader(file);
+									const br = new BufferedReader(reader);
+									const line = br.readLine();
+									br.close();
+									reader.close();
+									return line ? line.trim().toUpperCase() : "";
+								}
+							} catch(e) {
+								console.error("Read file error: " + path, e);
+							}
+							return "";
+						};
+
+						// 优先尝试有线，再尝试 WiFi
+						mac = readMacFile("/sys/class/net/eth0/address");
+						if (!mac || mac === "00:00:00:00:00:00") {
+							mac = readMacFile("/sys/class/net/wlan0/address");
+						}
+						
+						if (mac && mac !== "00:00:00:00:00:00") {
+							this.nativeMac = mac;
+						} else {
+							// Fallback: 尝试使用 WifiManager (针对旧版本 Android)
+							// 这里省略，因为现在大多数电视盒都是 Android 7/8/9+，文件读取通常更有效
+						}
+
+					} catch(e) {
+						console.error("Native Info Error:", e);
+					}
+				}
+				// #endif
+			},
+
 			initServerUrl() {
 				if (DEFAULT_SERVER_URL && DEFAULT_SERVER_URL.length > 0) {
 					console.log("Using hardcoded URL:", DEFAULT_SERVER_URL);
@@ -218,7 +324,7 @@
 			},
 			handleSettingsClick() {
 				const isHardcoded = DEFAULT_SERVER_URL && DEFAULT_SERVER_URL.length > 0;
-				let content = `当前设备ID: ${this.deviceId}\n前端地址: ${this.savedUrl}`;
+				let content = `当前设备ID: ${this.deviceId}\n本机IP: ${this.nativeIp}\n本机MAC: ${this.nativeMac}\n前端地址: ${this.savedUrl}`;
 				if (isHardcoded) content += `\n\n(注意：当前使用代码硬编码地址)`;
 				else content += `\n\n确定要重置连接地址吗？`;
 
@@ -280,6 +386,7 @@
 	.card { background-color: #333; border-radius: 12px; padding: 20px; width: 100%; max-width: 500px; margin-bottom: 20px; box-sizing: border-box; }
 	.info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 	.label { font-size: 16px; color: #aaa; margin-bottom: 8px; display: block; }
+	.value { font-size: 18px; color: #fff; font-family: monospace; }
 	.value.highlight { font-size: 24px; color: #4cd964; font-weight: bold; font-family: monospace; word-break: break-all; }
 	.desc { font-size: 12px; color: #666; margin-top: 5px; display: block; white-space: pre-line; line-height: 1.5; }
 	.form-card { background-color: #2a2a2a; border: 1px solid #444; }
