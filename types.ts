@@ -32,6 +32,10 @@ export interface ZoneConfig {
   titleColor?: string;
   titleFontSize?: number;
   
+  // Custom Colors (Override Global Theme)
+  backgroundColor?: string;
+  textColor?: string;
+
   // List Specific Config
   gridColumns?: number; // 1, 2, 3, 4
   gridRows?: number; // Limits the number of items shown (Cols * Rows)
@@ -42,8 +46,8 @@ export interface ZoneConfig {
   // Static Text Specific
   staticTextContent?: string; // For rich text/static notices
   staticTextSize?: number;
-  staticBgColor?: string;
-  staticTextColor?: string;
+  staticBgColor?: string; // Deprecated in favor of backgroundColor, kept for compat
+  staticTextColor?: string; // Deprecated in favor of textColor, kept for compat
 
   // Video Specific
   videoUrl?: string;
@@ -126,13 +130,16 @@ export interface DataSourceConfig {
   tableName: string; // View or Table name
   
   // Field Mapping (DB Column Name -> System Field)
+  // Updated to match Backend C# logic
   fieldMap: {
-    id: string;      // Unique Key
-    name: string;    // Patient Name
-    number: string;  // Queue Number (A001)
-    status: string;  // Status Column
-    windowId: string;// Filter by Window ID
-    order: string;   // Sort by time
+    id: string;           // Unique Key (default: id)
+    name: string;         // Patient Name (default: pat_name)
+    number: string;       // Queue Number (default: pat_number)
+    status: string;       // Status Column (default: pat_state)
+    windowNumber: string; // Window Number (default: window_number)
+    windowName: string;   // Window Name (default: window_name)
+    checkInTime: string;  // Check-in Time (default: check_in_time)
+    callTime: string;     // Call Time (default: call_time)
   };
 
   // Value Mapping (DB Value -> System State)

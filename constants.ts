@@ -138,7 +138,7 @@ export const DEFAULT_CONFIG: QueueConfig = {
 
   // System
   system: {
-    apiBaseUrl: 'https://api.hospital.com/v1',
+    apiBaseUrl: 'http://localhost:8081/api/v1',
     deviceId: 'Unknown',
     deviceMac: '00:00:00:00:00:00',
     deviceIp: '0.0.0.0',
@@ -154,12 +154,14 @@ export const DEFAULT_CONFIG: QueueConfig = {
     dbConnectionString: '',
     tableName: 'VIEW_PHARMACY_QUEUE',
     fieldMap: {
-      id: 'patient_id',
-      name: 'patient_name',
-      number: 'queue_no',
-      status: 'queue_status',
-      windowId: 'window_id',
-      order: 'checkin_time'
+      id: 'id',
+      name: 'pat_name',
+      number: 'pat_number',
+      status: 'pat_state',
+      windowNumber: 'window_number',
+      windowName: 'window_name',
+      checkInTime: 'check_in_time',
+      callTime: 'call_time'
     },
     statusMap: {
       waitingValue: '0',

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { QueueConfig, PRESET_THEMES, ContentType, QueueNumberStyle, PassedDisplayMode, ZoneConfig } from '../types';
 import api from '../services/api';
@@ -68,39 +69,51 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
 
   // Preview Scale Calculation
   const previewContainerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.4);
+  const [scale, setScale] = useState(0.1);
 
   // Safe layout access
   const safeLayout = config.layout || DEFAULT_CONFIG.layout;
   const isLandscape = safeLayout.orientation === 'landscape';
 
   useEffect(() => {
-    const calculateScale = () => {
-        if (previewContainerRef.current) {
-            const containerW = previewContainerRef.current.offsetWidth;
-            const containerH = previewContainerRef.current.offsetHeight;
-            
-            // Safe access inside effect as well
-            const currentOrientation = config.layout?.orientation || 'landscape';
-            const targetW = currentOrientation === 'landscape' ? 1920 : 1080;
-            const targetH = currentOrientation === 'landscape' ? 1080 : 1920;
-            
-            // Calculate ratios for both dimensions
-            const scaleX = (containerW - 40) / targetW; // 40px padding
-            const scaleY = (containerH - 40) / targetH;
-            
-            // Use the smaller scale to ensure it fits entirely
-            setScale(Math.max(0.1, Math.min(scaleX, scaleY, 1)));
-        }
+    const updateScale = () => {
+        if (!previewContainerRef.current) return;
+        const { offsetWidth: w, offsetHeight: h } = previewContainerRef.current;
+        
+        // Target dimensions (Full HD)
+        const currentOrientation = config.layout?.orientation || 'landscape';
+        const targetW = currentOrientation === 'landscape' ? 1920 : 1080;
+        const targetH = currentOrientation === 'landscape' ? 1080 : 1920;
+        
+        // Add padding safety (e.g., 40px total padding)
+        const availableW = Math.max(0, w - 40);
+        const availableH = Math.max(0, h - 40);
+        
+        // Calculate fit ratio
+        const scaleX = availableW / targetW;
+        const scaleY = availableH / targetH;
+        
+        // Use the smaller scale to ensure it fits entirely, with 95% fill factor for breathing room
+        const newScale = Math.min(scaleX, scaleY) * 0.95;
+        
+        // Ensure scale is valid and positive
+        setScale(Math.max(0.05, newScale));
     };
+
+    // Use ResizeObserver for robust tracking of container size changes
+    const observer = new ResizeObserver(() => {
+        // Debounce slightly if needed, but usually fine for simple calculations
+        requestAnimationFrame(updateScale);
+    });
+
+    if (previewContainerRef.current) {
+        observer.observe(previewContainerRef.current);
+    }
     
-    // Recalculate initially and on resize
-    const timer = setTimeout(calculateScale, 100);
-    window.addEventListener('resize', calculateScale);
-    return () => {
-        window.removeEventListener('resize', calculateScale);
-        clearTimeout(timer);
-    };
+    // Initial calculation
+    updateScale();
+
+    return () => observer.disconnect();
   }, [config.layout?.orientation, activeTab]); 
 
 
@@ -110,7 +123,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   };
 
   const handleUpdate = (path: string[], value: any) => {
-    const newConfig = { ...config };
+    const newConfig = JSON.parse(JSON.stringify(config)); // Deep copy
     let current: any = newConfig;
     for (let i = 0; i < path.length - 1; i++) {
       if (!current[path[i]]) current[path[i]] = {}; // Create if missing
@@ -316,10 +329,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
       
       console.log(`[ConfigPanel] Executing Overwrite Save. ID: ${currentPresetId}, Connected: ${isConnected}`);
 
+      // Bump version for hot reload
+      const configToSave = { ...config, configVersion: `v${Date.now()}` };
+      updateConfig(configToSave);
+
       if (isConnected) {
           try {
               // Pass EXISTING ID to update
-              await api.admin.savePreset(currentPresetId, currentPresetName, config);
+              await api.admin.savePreset(currentPresetId, currentPresetName, configToSave);
               toast.success("更新成功");
               setShowOverwriteModal(false);
           } catch(e: any) {
@@ -335,7 +352,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
           let list = saved ? JSON.parse(saved) : [];
           const idx = list.findIndex((p:any) => p.id === currentPresetId);
           if (idx >= 0) {
-              list[idx].config = config;
+              list[idx].config = configToSave;
               list[idx].timestamp = Date.now();
               localStorage.setItem('pharmacy-queue-presets', JSON.stringify(list));
               toast.success("更新成功 (本地)");
@@ -356,11 +373,15 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
       // Generate NEW ID
       const newPresetId = `p-${Date.now()}`;
       
+      // Bump version
+      const configToSave = { ...config, configVersion: `v${Date.now()}` };
+      updateConfig(configToSave);
+
       const newPreset = {
           id: newPresetId,
           name: saveName,
           timestamp: Date.now(),
-          config: config
+          config: configToSave
       };
 
       if (isConnected) {
@@ -427,6 +448,50 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
 
         {zone.type !== 'hidden' && (
           <>
+            {/* --- CUSTOM STYLES (NEW) --- */}
+            <div className="bg-gray-50 p-3 rounded-lg border border-dashed border-gray-300">
+                <label className="block text-xs font-bold text-gray-600 mb-2">区域自定义样式 (Zone Style)</label>
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-xs text-gray-500 mb-1 block">背景颜色</label>
+                        <div className="flex items-center gap-2">
+                            <input 
+                                type="color" 
+                                value={zone.backgroundColor || '#ffffff'}
+                                onChange={(e) => handleUpdate([...zoneKey, 'backgroundColor'], e.target.value)}
+                                className="h-8 w-full rounded cursor-pointer border border-gray-300"
+                            />
+                            {zone.backgroundColor && (
+                                <button 
+                                    onClick={() => handleUpdate([...zoneKey, 'backgroundColor'], undefined)}
+                                    className="text-xs text-red-500 hover:underline shrink-0"
+                                    title="恢复默认主题色"
+                                >重置</button>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs text-gray-500 mb-1 block">文字颜色</label>
+                        <div className="flex items-center gap-2">
+                            <input 
+                                type="color" 
+                                value={zone.textColor || '#000000'}
+                                onChange={(e) => handleUpdate([...zoneKey, 'textColor'], e.target.value)}
+                                className="h-8 w-full rounded cursor-pointer border border-gray-300"
+                            />
+                            {zone.textColor && (
+                                <button 
+                                    onClick={() => handleUpdate([...zoneKey, 'textColor'], undefined)}
+                                    className="text-xs text-red-500 hover:underline shrink-0"
+                                    title="恢复默认主题色"
+                                >重置</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-2">注：未设置时将自动使用全局外观配置的颜色。</p>
+            </div>
+
             {!isWindow && !isStatic && !isCurrent && !isVideo && (
               <div className="grid grid-cols-2 gap-4">
                  <div>
@@ -622,7 +687,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                       <input 
                         type="checkbox" 
                         checked={zone.showWindowSubTitle !== false} 
-                        onChange={(e) => handleUpdate([...zoneKey, 'showWindowSubTitle'], e.target.checked)} 
+                        onChange={(e) => handleUpdate([...zoneKey, 'showWindowSubTitle'], e.target.value)} 
                         className="accent-blue-600"
                       />
                     </div>
@@ -649,16 +714,6 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                   className="w-full border p-2 rounded text-xs font-mono"
                   placeholder="<div>通知...</div>"
                 />
-                <div className="grid grid-cols-2 gap-2">
-                   <div>
-                     <label className="text-xs text-gray-500">背景色</label>
-                     <input type="color" value={zone.staticBgColor || '#ffffff'} onChange={e => handleUpdate([...zoneKey, 'staticBgColor'], e.target.value)} className="w-full h-8"/>
-                   </div>
-                   <div>
-                     <label className="text-xs text-gray-500">文字色</label>
-                     <input type="color" value={zone.staticTextColor || '#000000'} onChange={e => handleUpdate([...zoneKey, 'staticTextColor'], e.target.value)} className="w-full h-8"/>
-                   </div>
-                </div>
               </div>
             )}
           </>
@@ -1235,9 +1290,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                                 <div className="pt-2">
                                     <label className="block text-xs font-bold text-gray-700 mb-2">字段映射 (Field Mapping)</label>
                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                        {['id', 'name', 'number', 'status', 'windowId', 'order'].map(field => (
+                                        {['id', 'name', 'number', 'status', 'windowNumber', 'windowName', 'checkInTime', 'callTime'].map(field => (
                                             <div key={field} className="flex items-center gap-2">
-                                                <span className="w-16 text-gray-500 text-right capitalize">{field}:</span>
+                                                <span className="w-24 text-gray-500 text-right capitalize truncate" title={field}>{field}:</span>
                                                 <input 
                                                     type="text"
                                                     value={(config.dataSource?.fieldMap as any)?.[field] || ''}
@@ -1301,16 +1356,19 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                   <div className="font-mono">{isLandscape ? '1920x1080' : '1080x1920'} | Scale: {Math.round(scale * 100)}%</div>
               </div>
               
-              <div ref={previewContainerRef} className="flex-1 w-full overflow-hidden flex items-center justify-center p-4">
+              <div ref={previewContainerRef} className="flex-1 w-full relative overflow-hidden bg-black flex items-center justify-center">
                   <div 
-                     className="bg-black shadow-2xl overflow-hidden transition-all duration-300 ease-in-out border border-gray-700 origin-center"
+                     className="absolute shadow-2xl overflow-hidden border border-gray-700 bg-black origin-center"
                      style={{
                         width: `${previewWidth}px`,
                         height: `${previewHeight}px`,
-                        transform: `scale(${scale})`,
+                        top: '50%',
+                        left: '50%',
+                        transform: `translate(-50%, -50%) scale(${scale})`,
+                        pointerEvents: 'none' // Disable interaction in preview to prevent scrolling issues
                      }}
                   >
-                     <DisplayScreen config={config} />
+                     <DisplayScreen config={config} isPreview={true} />
                   </div>
               </div>
           </div>

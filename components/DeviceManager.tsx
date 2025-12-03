@@ -52,7 +52,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
           macAddress: '',
           assignedWindowNumber: '1',
           assignedWindowName: '综合窗口',
-          linkedPresetId: availablePresets[0]?.id || '',
+          linkedPresetId: availablePresets[0]?.id || 'default',
           status: 'online',
           lastSeen: new Date().toISOString()
       };
@@ -110,9 +110,18 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
         return;
     }
 
+    // FIX: Handle "Select Default Value" trap.
+    // If linkedPresetId is empty (because select defaulted visually but state didn't update),
+    // force select the first available preset.
+    let finalPresetId = editForm.linkedPresetId;
+    if (!finalPresetId && availablePresets.length > 0) {
+        finalPresetId = availablePresets[0].id;
+    }
+
     // Clean data (Optional fields default to empty string)
     const cleanForm = {
         ...editForm,
+        linkedPresetId: finalPresetId,
         ipAddress: editForm.ipAddress || '',
         macAddress: editForm.macAddress || ''
     };

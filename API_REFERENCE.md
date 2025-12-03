@@ -134,6 +134,7 @@
     *   `window`: (Query, Optional) 窗口号过滤。
         *   若传值 (e.g., `?window=1`)，只返回该窗口的队列数据（分诊屏模式）。
         *   若不传，返回所有窗口数据（综合大屏模式）。
+    *   `deviceId`: (Query, Optional) 设备ID，用于后端定向推送或统计。
 *   **Response**:
     ```json
     {

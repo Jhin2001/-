@@ -1,5 +1,4 @@
 
-
 {
   "id": "default",
   "name": "默认样式 (Standard Purple)",
@@ -122,7 +121,7 @@
       }
     },
     "system": {
-      "apiBaseUrl": "https://api.hospital.com/v1",
+      "apiBaseUrl": "http://localhost:8081/api/v1",
       "deviceMac": "00:00:00:00:00:00",
       "deviceIp": "127.0.0.1",
       "deviceId": "WIN-01",
@@ -136,12 +135,14 @@
       "dbConnectionString": "",
       "tableName": "VIEW_PHARMACY_QUEUE",
       "fieldMap": {
-        "id": "patient_id",
-        "name": "patient_name",
-        "number": "queue_no",
-        "status": "queue_status",
-        "windowId": "window_id",
-        "order": "checkin_time"
+        "id": "id",
+        "name": "pat_name",
+        "number": "pat_number",
+        "status": "pat_state",
+        "windowNumber": "window_number",
+        "windowName": "window_name",
+        "checkInTime": "check_in_time",
+        "callTime": "call_time"
       },
       "statusMap": {
         "waitingValue": "0",

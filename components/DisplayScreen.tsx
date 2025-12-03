@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG } from '../constants';
 
 interface DisplayScreenProps {
   config: QueueConfig;
+  isPreview?: boolean;
 }
 
 // Hook for responsive checks
@@ -13,11 +14,9 @@ const useMediaQuery = (query: string) => {
   const [matches, setMatches] = useState(false);
 
   useEffect(() => {
-    // Safety check for environment
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
         return;
     }
-    
     try {
         const media = window.matchMedia(query);
         if (media.matches !== matches) {
@@ -27,7 +26,6 @@ const useMediaQuery = (query: string) => {
         media.addEventListener('change', listener);
         return () => media.removeEventListener('change', listener);
     } catch (e) {
-        console.warn("MatchMedia failed", e);
         return;
     }
   }, [matches, query]);
@@ -35,11 +33,9 @@ const useMediaQuery = (query: string) => {
   return matches;
 };
 
-const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
+const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  // --- SAFETY FALLBACKS ---
-  // Ensure we always have valid objects even if API sends partial data
   const theme = config.theme || DEFAULT_CONFIG.theme;
   const layout = config.layout || DEFAULT_CONFIG.layout;
   const header = config.header || DEFAULT_CONFIG.header;
@@ -49,14 +45,21 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   const waitingList = config.waitingList || [];
   const passedList = config.passedList || [];
 
-  // Responsive Check: TV/Desktop vs Mobile/Tablet
-  const isLargeScreen = useMediaQuery('(min-width: 1024px)');
+  // Threshold: 1024x600. Anything smaller is considered "Mobile/Small TV"
+  const isLargeScreenRaw = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
+  // If in preview mode, always treat as large screen (TV mode) because container is scaled
+  const isLargeScreen = isPreview ? true : isLargeScreenRaw;
+  
+  const isHorizontal = layout.orientation === 'landscape';
 
-  // Determine Layout Mode
-  const isHorizontal = layout.orientation === 'landscape' && isLargeScreen;
+  // --- RESPONSIVE HELPER ---
+  // Converts design pixels (based on ~1080p height) to VH units on small screens
+  // 1080px = 100vh => 10px approx 1vh. We use a slightly tighter ratio (div by 12) for better fit.
+  const getSize = (px: number) => {
+      if (isLargeScreen) return `${px}px`;
+      return `${(px / 10.8).toFixed(2)}vh`;
+  };
 
-  // Track the last called ID and timestamp to handle deduplication and recalls
-  // Initialize with CURRENT patient ID to prevent speaking immediately on page load/refresh
   const lastCalledRef = useRef<{id: string, ts: number} | null>((() => {
      if (config.currentPatient?.id) {
          const p = config.currentPatient;
@@ -75,25 +78,13 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // --- Optimization Logic: Detect if current layout is Static Text Only ---
   const isStaticOnly = useMemo(() => {
-    // Check all 4 zones safely
     const zones = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
     const hasDynamicContent = zones.some(z => 
-       z && (
-       z.type === 'waiting-list' || 
-       z.type === 'current-call' || 
-       z.type === 'window-info' || 
-       z.type === 'passed-list'
-       )
+       z && (z.type === 'waiting-list' || z.type === 'current-call' || z.type === 'window-info' || z.type === 'passed-list')
     );
     return !hasDynamicContent;
-  }, [
-      layout.topLeft?.type, 
-      layout.topRight?.type, 
-      layout.bottomLeft?.type, 
-      layout.bottomRight?.type
-  ]);
+  }, [layout]);
 
   const pollingStatus = useMemo(() => {
      if (config.dataSource?.pollingStrategy === 'smart' && isStaticOnly) {
@@ -102,9 +93,9 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
      return 'active';
   }, [config.dataSource?.pollingStrategy, isStaticOnly]);
 
-
-  // --- TV Adaptation: Hide Cursor on Inactivity ---
   useEffect(() => {
+    if (isPreview) return; // Don't hide cursor in preview mode
+
     let cursorTimer: any;
     const hideCursor = () => document.body.style.cursor = 'none';
     const showCursor = () => {
@@ -112,14 +103,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
       clearTimeout(cursorTimer);
       cursorTimer = setTimeout(hideCursor, 3000);
     };
-
     window.addEventListener('mousemove', showCursor);
     window.addEventListener('click', showCursor);
     window.addEventListener('touchstart', showCursor);
-
-    // Initial timer
     cursorTimer = setTimeout(hideCursor, 3000);
-
     return () => {
       window.removeEventListener('mousemove', showCursor);
       window.removeEventListener('click', showCursor);
@@ -127,56 +114,41 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
       clearTimeout(cursorTimer);
       document.body.style.cursor = 'default';
     };
-  }, []);
+  }, [isPreview]);
 
-
-  // --- Speech Synthesis Logic ---
   useEffect(() => {
-    // Security check: If device is not registered, DO NOT SPEAK.
+    if (isPreview) return; // Don't speak in preview mode
     if (!system?.isRegistered) return;
-
     if (!speech?.enabled || !currentPatient.id) return;
 
     const p = currentPatient;
     const last = lastCalledRef.current;
     
-    // Helper to normalize timestamp to number
     const currentTs = p.callTimestamp 
       ? (typeof p.callTimestamp === 'number' ? p.callTimestamp : new Date(p.callTimestamp).getTime()) 
       : 0;
 
-    // Logic:
-    // 1. New Call: Different ID from last
-    // 2. Recall: Same ID but newer timestamp
     const isNewCall = !last || last.id !== p.id;
     const isRecall = last && last.id === p.id && currentTs > last.ts;
 
     if (isNewCall || isRecall) {
-      // Check Broadcast Mode
-      // 'all' = Centralized calling (broadcasts everything)
-      // 'local' = Only broadcast if window matches config
       if (speech.broadcastMode === 'local') {
-         // Strict Check: Match Window Number (Preferred)
          const pWinNum = p.windowNumber;
          const cWinNum = config.windowNumber;
          
          if (pWinNum && cWinNum) {
-           // If numbers are available, strict match
            if (pWinNum !== cWinNum) {
               lastCalledRef.current = { id: p.id, ts: currentTs };
-              return; // Do not speak
+              return; 
            }
          } else if (p.windowName && p.windowName !== config.windowName) {
-           // Fallback: If no number, check Window Name
            lastCalledRef.current = { id: p.id, ts: currentTs };
-           return; // Do not speak
+           return; 
          }
       }
 
-      // Update ref to prevent repeats
       lastCalledRef.current = { id: p.id, ts: currentTs };
       
-      // Prepare text
       const windowTarget = p.windowName || config.windowName;
       const textToSpeak = speech.template
         .replace(/{name}/g, p.name)
@@ -185,63 +157,55 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
       speak(textToSpeak);
     }
-  }, [currentPatient, speech, config.windowName, config.windowNumber, system?.isRegistered]);
+  }, [currentPatient, speech, config.windowName, config.windowNumber, system?.isRegistered, isPreview]);
 
   const speak = (text: string) => {
     try {
-        // Basic browser TTS check
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            // Note: Browsers automatically queue calls to speak()
             const utterance = new SpeechSynthesisUtterance(text);
-            // Ensure speech object properties are accessed safely
             utterance.volume = speech?.volume || 1; 
             utterance.rate = speech?.rate || 1;
             utterance.pitch = speech?.pitch || 1;
             utterance.lang = 'zh-CN';
-            
             window.speechSynthesis.speak(utterance);
         }
-    } catch (e) {
-        console.warn("Speech synthesis failed (likely browser restriction):", e);
-    }
+    } catch (e) {}
   };
 
-
-  // --- Unregistered State Overlay ---
-  if (system && !system.isRegistered) {
+  if (system && !system.isRegistered && !isPreview) {
     return (
-      <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center text-white p-6 py-12 md:p-8 space-y-8 select-none">
-        <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-red-600 flex items-center justify-center animate-pulse shadow-lg shadow-red-900/50 shrink-0">
-           <WifiOff size={40} className="md:w-12 md:h-12" />
-        </div>
-        <div className="text-center space-y-3">
-           <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight">终端未注册 (Unregistered)</h1>
-           <p className="text-lg md:text-xl lg:text-2xl text-gray-400 px-4">此设备尚未绑定任何窗口或预案</p>
-        </div>
-        
-        <div className="bg-gray-800 p-6 md:p-8 rounded-2xl border border-gray-700 w-full max-w-xl lg:max-w-2xl shadow-xl">
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 text-base md:text-lg font-mono">
-              <div className="flex justify-between md:contents items-center border-b md:border-0 border-gray-700 pb-2 md:pb-0">
-                  <div className="text-gray-500">Device ID:</div>
-                  <div className="text-right text-green-400 font-bold text-xl md:text-2xl break-all">{system.deviceId}</div>
-              </div>
-              
-              <div className="flex justify-between md:contents items-center pt-2 md:pt-0">
-                  <div className="text-gray-500">IP Address:</div>
-                  <div className="text-right text-blue-400 break-all">{system.deviceIp || '---'}</div>
-              </div>
-           </div>
-        </div>
+      <div className="fixed inset-0 w-screen h-screen bg-gray-900 flex flex-col items-center justify-center text-white overflow-hidden select-none">
+        <div className="flex flex-col items-center gap-[2vh]">
+            <div className="rounded-full bg-red-600 flex items-center justify-center animate-pulse shadow-lg shadow-red-900/50 shrink-0" 
+                 style={{ width: '15vmin', height: '15vmin' }}>
+               <WifiOff className="text-white" style={{ width: '8vmin', height: '8vmin' }} />
+            </div>
+            
+            <div className="text-center">
+               <h1 className="font-bold tracking-tight" style={{ fontSize: '5vmin', lineHeight: 1.2 }}>终端未注册</h1>
+               <p className="text-gray-400" style={{ fontSize: '3vmin' }}>Unregistered Device</p>
+            </div>
+            
+            <div className="bg-gray-800 rounded-xl border border-gray-700 w-[70vw] max-w-lg shadow-xl p-[3vmin]">
+               <div className="grid grid-cols-1 gap-[1.5vmin]">
+                  <div className="flex justify-between items-center border-b border-gray-700 pb-[1.5vmin]">
+                      <div className="text-gray-500" style={{ fontSize: '3.5vmin' }}>Device ID</div>
+                      <div className="text-right text-green-400 font-bold font-mono break-all" style={{ fontSize: '4.5vmin' }}>{system.deviceId}</div>
+                  </div>
+                  <div className="flex justify-between items-center pt-[0.5vmin]">
+                      <div className="text-gray-500" style={{ fontSize: '3.5vmin' }}>IP Address</div>
+                      <div className="text-right text-blue-400 break-all" style={{ fontSize: '3.5vmin' }}>{system.deviceIp || '---'}</div>
+                  </div>
+               </div>
+            </div>
 
-        <div className="text-base md:text-lg text-gray-500 mt-8 animate-bounce text-center px-4">
-          请联系管理员在后台 "终端窗口管理" 中绑定此 ID
+            <div className="text-gray-500 text-center px-4" style={{ fontSize: '2.5vmin' }}>
+              请联系管理员在后台绑定此设备
+            </div>
         </div>
       </div>
     );
   }
-
-
-  // --- Helper Functions ---
 
   const formatDate = (date: Date) => {
     const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
@@ -253,71 +217,83 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     return date.toLocaleTimeString('zh-CN', { hour12: false });
   };
 
-  const renderQueueNumber = (number: string, style: QueueNumberStyle, fontSizeClass: string = 'text-sm', isCurrent?: boolean) => {
+  const renderQueueNumber = (number: string, style: QueueNumberStyle, fontSize: string, isCurrent?: boolean) => {
     if (!config.showQueueNumber) return null;
 
     if (style === 'none') {
-       // Just colored text, no background box
-       return <span className={`${fontSizeClass} font-bold ${isCurrent ? 'text-white' : 'text-teal-600'}`}>{number}</span>;
+       return <span className={`font-bold ${isCurrent ? 'text-white' : 'text-teal-600'}`} style={{ fontSize }}>{number}</span>;
     }
 
-    // Badge Styles
-    const baseClasses = "font-bold text-white flex items-center justify-center shadow-sm px-2 py-0.5";
+    const baseClasses = "font-bold text-white flex items-center justify-center shadow-sm px-[0.4em] py-[0.1em]";
     const shapeClass = 
       style === 'circle' ? 'rounded-full aspect-square' :
       style === 'square' ? 'rounded-none' : 'rounded-lg';
     
     return (
       <span 
-        className={`${baseClasses} ${shapeClass} ${fontSizeClass} ${isCurrent ? 'bg-orange-500' : 'bg-teal-500'}`}
-        style={{ minWidth: '2.5em' }}
+        className={`${baseClasses} ${shapeClass} ${isCurrent ? 'bg-orange-500' : 'bg-teal-500'}`}
+        style={{ fontSize, minWidth: '2em' }}
       >
         {number}
       </span>
     );
   };
 
-  // --- Component Factory ---
   const renderZoneContent = (zoneConfig: ZoneConfig) => {
-    // Safety check
     if (!zoneConfig || zoneConfig.type === 'hidden') return null;
 
-    // Common Wrapper Style
+    // --- APPLY ZONE CUSTOM COLORS OR FALLBACK TO THEME ---
+    const customBg = zoneConfig.backgroundColor;
+    const customText = zoneConfig.textColor;
+
     const wrapperClass = "w-full h-full shadow-lg relative overflow-hidden flex flex-col";
-    // Use cardBackground and textMain from theme
+    
+    // Default Style (Lists, Video, etc)
     const wrapperStyle = { 
-        borderRadius: `${config.cardRounded}px`, 
-        backgroundColor: theme.cardBackground || '#fff',
-        color: theme.textMain || '#111827'
+        borderRadius: getSize(config.cardRounded),
+        backgroundColor: customBg || theme.cardBackground || '#fff',
+        color: customText || theme.textMain || '#111827'
     };
 
     switch (zoneConfig.type) {
       case 'window-info':
+        // Logic: Use gradient by default, but solid color if customBg is set
+        const windowStyle = {
+            ...wrapperStyle,
+            color: customText || '#fff', // Default window text is white
+            background: customBg ? customBg : `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primary}dd 100%)`
+        };
+
         return (
-          <div className={wrapperClass} style={{ ...wrapperStyle, background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primary}dd 100%)`, color: '#fff' }}>
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full transform translate-x-1/3 -translate-y-1/3 pointer-events-none"></div>
-            <div className="flex-1 flex flex-col items-center justify-center p-4">
-               {/* Window Number Section */}
+          <div className={wrapperClass} style={windowStyle}>
+            {/* Show deco bubble only if no custom background is set (to keep clean look on custom) */}
+            {!customBg && <div className="absolute top-0 right-0 w-[40%] h-[40%] bg-white opacity-5 rounded-full transform translate-x-1/3 -translate-y-1/3 pointer-events-none"></div>}
+            
+            <div className="flex-1 flex flex-col items-center justify-center p-[2vmin]">
                {(zoneConfig.showWindowNumber !== false) && (
-                 <div className="relative mb-2">
-                  <div className="w-32 h-32 rounded-full bg-white bg-opacity-20 flex items-center justify-center backdrop-blur-sm">
-                    <span className="font-bold leading-none" style={{ fontSize: `${zoneConfig.windowNumberFontSize || config.windowNumberSize}px` }}>
+                 <div className="relative mb-[1vmin]">
+                  <div className="rounded-full bg-white bg-opacity-20 flex items-center justify-center backdrop-blur-sm shadow-sm"
+                       style={{ 
+                           width: getSize(128), // approx w-32
+                           height: getSize(128) 
+                       }}>
+                    <span className="font-bold leading-none" style={{ fontSize: getSize(zoneConfig.windowNumberFontSize || config.windowNumberSize) }}>
                       {config.windowNumber}
                     </span>
                   </div>
-                  <div className="text-center text-sm mt-1 opacity-80">窗口</div>
+                  <div className="text-center opacity-80 mt-[0.5vmin]" style={{ fontSize: getSize(16) }}>窗口</div>
                 </div>
                )}
               
-              {/* Rich Text Subtitle */}
               {(zoneConfig.showWindowSubTitle !== false) && (
                 <div 
-                   className="mb-1 text-center"
-                   dangerouslySetInnerHTML={{ __html: zoneConfig.windowSubTitleHtml || '<div class="text-lg opacity-90">请排队 取号</div>' }}
+                   className="mb-[0.5vmin] text-center"
+                   style={{ fontSize: getSize(20) }}
+                   dangerouslySetInnerHTML={{ __html: zoneConfig.windowSubTitleHtml || '<div style="opacity:0.9;">请排队 取号</div>' }}
                 />
               )}
               
-              <div className="font-bold text-center" style={{ fontSize: `${zoneConfig.windowNameFontSize || config.windowNameSize}px` }}>
+              <div className="font-bold text-center leading-tight" style={{ fontSize: getSize(zoneConfig.windowNameFontSize || config.windowNameSize) }}>
                 {config.windowName}
               </div>
             </div>
@@ -325,30 +301,36 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
         );
 
       case 'current-call':
+        const currentStyle = {
+            ...wrapperStyle,
+            color: customText || '#fff',
+            background: customBg ? customBg : `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primary}dd 100%)`
+        };
+
         return (
-          <div className={wrapperClass} style={{ ...wrapperStyle, background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primary}dd 100%)`, color: '#fff' }}>
-             <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <div className={wrapperClass} style={currentStyle}>
+             <div className="flex-1 flex flex-col items-center justify-center p-[2vmin]">
                 {(zoneConfig.showCurrentTitle !== false) && (
-                  <div className="font-semibold opacity-90 mb-4" style={{ fontSize: `${zoneConfig.currentTitleFontSize || 24}px` }}>
+                  <div className="font-semibold opacity-90 mb-[2vmin]" style={{ fontSize: getSize(zoneConfig.currentTitleFontSize || 24) }}>
                      {zoneConfig.currentTitleText || '正在取药'}
                   </div>
                 )}
                 
-                <div className="flex flex-col md:flex-row items-center gap-4 text-center">
-                   <div className="font-bold" style={{ fontSize: `${zoneConfig.currentNameFontSize || 60}px` }}>
+                <div className="flex flex-col md:flex-row items-center gap-[2vmin] text-center">
+                   <div className="font-bold" style={{ fontSize: getSize(zoneConfig.currentNameFontSize || 60) }}>
                       {currentPatient.name}
                    </div>
                    {config.showQueueNumber && config.queueNumberStyle === 'none' && (
-                     <div className="font-bold text-teal-200" style={{ fontSize: `${zoneConfig.currentNumberFontSize || 40}px` }}>
+                     <div className="font-bold text-teal-200" style={{ fontSize: getSize(zoneConfig.currentNumberFontSize || 40) }}>
                         {currentPatient.number}
                      </div>
                    )}
                 </div>
                 {config.showQueueNumber && config.queueNumberStyle !== 'none' && (
-                  <div className={`mt-6 bg-teal-400 text-white px-8 py-2 font-bold shadow-md ${
+                  <div className={`mt-[3vmin] bg-teal-400 text-white px-[4vmin] py-[1vmin] font-bold shadow-md ${
                     config.queueNumberStyle === 'circle' ? 'rounded-full' : 
                     config.queueNumberStyle === 'square' ? 'rounded-none' : 'rounded-lg'
-                  }`} style={{ fontSize: `${zoneConfig.currentNumberFontSize || 36}px` }}>
+                  }`} style={{ fontSize: getSize(zoneConfig.currentNumberFontSize || 36) }}>
                     {currentPatient.number}
                   </div>
                 )}
@@ -357,83 +339,84 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
         );
 
       case 'waiting-list':
-        // Determine list content based on mode
-        let displayList: (Patient & { isPassed?: boolean, isCurrent?: boolean })[] = [...waitingList];
+      case 'passed-list':
+        const isPassedList = zoneConfig.type === 'passed-list';
+        let displayList: (Patient & { isCurrent?: boolean; isPassed?: boolean })[] = isPassedList ? [...passedList] : [...waitingList];
         
-        // --- Merge Current Patient Logic ---
-        if (zoneConfig.includeCurrent && currentPatient && currentPatient.id) {
+        if (!isPassedList && zoneConfig.includeCurrent && currentPatient && currentPatient.id) {
            displayList = [{ ...currentPatient, isCurrent: true }, ...displayList];
         }
-
-        // --- Merge Passed Patient Logic ---
-        if (config.passedDisplayMode === 'wait-list-end') {
+        if (!isPassedList && config.passedDisplayMode === 'wait-list-end') {
           const passedPatients = passedList.map(p => ({ ...p, isPassed: true }));
           displayList = [...displayList, ...passedPatients];
         }
 
-        // Calculate limit
-        const waitLimit = (zoneConfig.gridColumns || 1) * (zoneConfig.gridRows || 3);
-        const visibleWaiting = displayList.slice(0, waitLimit);
+        const rows = zoneConfig.gridRows || 3;
+        const cols = zoneConfig.gridColumns || 1;
+        const limit = rows * cols;
+        const visibleList = displayList.slice(0, limit);
+
+        const titleSize = getSize(zoneConfig.titleFontSize || 18);
+        const contentSize = getSize(zoneConfig.contentFontSize || (isPassedList ? 20 : 24));
+        const smallSize = getSize(12);
+
+        // Header Background for List: Use Secondary for Passed, Primary for Waiting (unless overridden)
+        // Note: The main card background is handled by `wrapperStyle`
+        const headerBg = isPassedList ? theme.secondary : theme.primary;
 
         return (
           <div className={wrapperClass} style={wrapperStyle}>
-             <div className="py-2 px-4 text-white font-bold text-lg flex justify-between items-center shrink-0" style={{ background: theme.primary }}>
-               <span style={{ fontSize: `${zoneConfig.titleFontSize || 18}px`, color: zoneConfig.titleColor }}>
-                 {zoneConfig.title || '等待取药'}
+             <div className="py-[1vmin] px-[2vmin] text-white font-bold flex justify-between items-center shrink-0" 
+                  style={{ background: headerBg }}>
+               <span style={{ fontSize: titleSize, color: zoneConfig.titleColor }}>
+                 {zoneConfig.title || (isPassedList ? '过号患者' : '等待取药')}
                </span>
-               <span className="text-xs bg-white bg-opacity-20 px-2 py-1 rounded">{displayList.length}人等待</span>
+               {!isPassedList && <span className="bg-white bg-opacity-20 px-[1vmin] py-[0.5vmin] rounded" style={{ fontSize: smallSize }}>{displayList.length}人等待</span>}
              </div>
              <div 
-                className="flex-1 p-3 content-start overflow-hidden"
+                className="flex-1 p-[1vmin] overflow-hidden"
                 style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: `repeat(${zoneConfig.gridColumns || 1}, minmax(0, 1fr))`,
-                  gridAutoRows: 'min-content',
-                  gap: '0.75rem',
-                  alignContent: 'start'
+                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${rows}, 1fr)`, // FORCE FIT HEIGHT
+                  gap: getSize(12), // approx 0.75rem
                 }}
              >
-               {visibleWaiting.map((patient) => {
-                  const isGrayed = patient.isPassed && config.grayOutPassed;
+               {visibleList.map((patient: any) => {
+                  const isGrayed = (patient.isPassed || isPassedList) && config.grayOutPassed;
                   const isCurrent = patient.isCurrent;
-                  
-                  // Highlight logic only applies if enabled and isCurrent
                   const isHighlighted = isCurrent && zoneConfig.highlightCurrent;
 
                   return (
                     <div 
                       key={patient.id} 
-                      className={`
-                        border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit gap-2
-                      `}
+                      className={`border rounded-lg px-[1.5vmin] flex justify-between items-center shadow-sm w-full h-full`}
                       style={{
-                        // Dynamic Styles for Dark Mode / Custom Theme support
                         backgroundColor: isGrayed ? 'rgba(0,0,0,0.05)' : isHighlighted ? 'rgba(255, 165, 0, 0.1)' : 'transparent',
-                        borderColor: isHighlighted ? 'rgba(255, 165, 0, 0.5)' : (theme.textMain ? `${theme.textMain}20` : '#e5e7eb'), // 20 = ~12% opacity
-                        color: isGrayed ? '#9ca3af' : (theme.textMain || '#374151')
+                        borderColor: isHighlighted ? 'rgba(255, 165, 0, 0.5)' : (customText ? `${customText}20` : (theme.textMain ? `${theme.textMain}20` : '#e5e7eb')),
+                        color: isGrayed ? '#9ca3af' : (customText || theme.textMain || '#374151'),
+                        gap: getSize(8)
                       }}
                     >
-                      {/* Name and Badges Container */}
-                      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                      <div className="flex items-center min-w-0 flex-1 overflow-hidden" style={{ gap: getSize(8) }}>
                         <span 
                            className={`font-bold truncate ${isGrayed ? 'line-through' : ''}`} 
                            style={{ 
-                               fontSize: `${zoneConfig.contentFontSize || 24}px`,
+                               fontSize: contentSize,
                                color: isHighlighted ? '#c2410c' : 'inherit'
                            }}
                         >
                           {patient.name}
                         </span>
                         
-                        {isGrayed && <span className="flex-shrink-0 text-[10px] bg-gray-200 text-gray-600 px-1 rounded whitespace-nowrap">过号</span>}
+                        {(isGrayed || isPassedList) && <span className="flex-shrink-0 bg-gray-200 text-gray-600 px-[0.5em] rounded whitespace-nowrap" style={{ fontSize: smallSize }}>过号</span>}
                         {isCurrent && isHighlighted && (
-                           <span className="flex-shrink-0 text-[10px] bg-orange-200 text-orange-800 px-1 rounded font-bold animate-pulse whitespace-nowrap">正在叫号</span>
+                           <span className="flex-shrink-0 bg-orange-200 text-orange-800 px-[0.5em] rounded font-bold animate-pulse whitespace-nowrap" style={{ fontSize: smallSize }}>正在叫号</span>
                         )}
                       </div>
 
-                      {/* Number Container (Right aligned) */}
                       <div className={`flex-shrink-0 ${isGrayed ? 'opacity-50 grayscale' : ''}`}>
-                         {renderQueueNumber(patient.number, config.queueNumberStyle, 'text-sm', isHighlighted)}
+                         {renderQueueNumber(patient.number, config.queueNumberStyle, getSize(16), isHighlighted)}
                       </div>
                     </div>
                   );
@@ -442,58 +425,17 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
           </div>
         );
 
-      case 'passed-list':
-        const passLimit = (zoneConfig.gridColumns || 1) * (zoneConfig.gridRows || 3);
-        const visiblePassed = passedList.slice(0, passLimit);
-
-        return (
-          <div className={wrapperClass} style={wrapperStyle}>
-            <div className="py-2 px-4 text-white font-bold text-lg shrink-0" style={{ background: theme.secondary }}>
-               <span style={{ fontSize: `${zoneConfig.titleFontSize || 18}px`, color: zoneConfig.titleColor }}>
-                {zoneConfig.title || '过号患者'}
-               </span>
-            </div>
-            <div 
-                className="flex-1 p-3 content-start overflow-hidden"
-                style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: `repeat(${zoneConfig.gridColumns || 1}, minmax(0, 1fr))`,
-                  gridAutoRows: 'min-content',
-                  gap: '0.75rem',
-                  alignContent: 'start'
-                }}
-             >
-              {visiblePassed.map((patient) => (
-                <div 
-                    key={patient.id} 
-                    className="border rounded-lg p-2 px-3 flex justify-between items-center shadow-sm h-fit"
-                    style={{
-                        borderColor: theme.textMain ? `${theme.textMain}20` : '#e5e7eb',
-                        color: theme.textMain ? `${theme.textMain}90` : '#6b7280' // Slightly transparent text
-                    }}
-                >
-                  <span className="font-bold truncate" style={{ fontSize: `${zoneConfig.contentFontSize || 20}px` }}>
-                    {patient.name}
-                  </span>
-                  {renderQueueNumber(patient.number, config.queueNumberStyle, 'text-xs')}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-
       case 'static-text':
         return (
           <div className={wrapperClass} style={{ 
             ...wrapperStyle, 
-            background: zoneConfig.staticBgColor || '#fff',
-            color: zoneConfig.staticTextColor || '#333'
+            background: zoneConfig.staticBgColor || wrapperStyle.backgroundColor, // Fallback to new prop or theme
+            color: zoneConfig.staticTextColor || wrapperStyle.color
           }}>
-            <div className="flex-1 p-4 flex flex-col h-full overflow-hidden">
-               {/* Rich Text Block */}
+            <div className="flex-1 p-[2vmin] flex flex-col h-full overflow-hidden">
                <div 
                  className="w-full h-full overflow-y-auto"
-                 style={{ fontSize: `${zoneConfig.staticTextSize || 24}px` }}
+                 style={{ fontSize: getSize(zoneConfig.staticTextSize || 24) }}
                  dangerouslySetInnerHTML={{ __html: zoneConfig.staticTextContent || '请输入文本...' }}
                />
             </div>
@@ -516,7 +458,7 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
                    />
                ) : (
                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-                      <p>未设置视频源</p>
+                      <p style={{ fontSize: getSize(16) }}>未设置视频源</p>
                    </div>
                )}
             </div>
@@ -527,22 +469,16 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     }
   };
 
-  // Layout Logic Vars
   const hasLeft = layout.topLeft?.type !== 'hidden' || layout.bottomLeft?.type !== 'hidden';
   const hasRight = layout.topRight?.type !== 'hidden' || layout.bottomRight?.type !== 'hidden';
   
-  // Calculate final widths based on visibility and screen size
-  // If Portrait/Mobile: Width is 100%
-  // If Landscape Large Screen: Width is determined by splitRatio
   const leftWidth = isHorizontal 
     ? (hasLeft && hasRight ? `${layout.splitRatio}%` : (hasLeft ? '100%' : '0%')) 
     : '100%';
-  
   const rightWidth = isHorizontal 
     ? (hasLeft && hasRight ? `${100 - layout.splitRatio}%` : (hasRight ? '100%' : '0%')) 
     : '100%';
 
-  // --- Footer Text Logic ---
   let footerHtml = layout.footerText;
   if (config.passedDisplayMode === 'footer' && passedList.length > 0) {
     const passedNames = passedList.map(p => `${p.name}(${p.number})`).join('，');
@@ -550,37 +486,38 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
     footerHtml += passedHtml;
   }
 
+  // Header Height Calculation
+  const headerHeightVal = isLargeScreen ? header.height : 12; // 12vh for small
+  const headerHeightStyle = isLargeScreen ? `${headerHeightVal}px` : `${headerHeightVal}vh`;
+
   return (
     <div 
-      className="w-full h-full flex flex-col relative overflow-hidden select-none"
+      className={`${isPreview ? 'absolute w-full h-full' : 'fixed inset-0 w-screen h-screen'} flex flex-col overflow-hidden select-none`}
       style={{ 
         backgroundColor: theme.background || '#e5e7eb',
-        padding: layout.overscanPadding || 0
+        padding: getSize(layout.overscanPadding || 0)
       }}
     >
-      {/* --- Hot Reload & Polling Status Indicator --- */}
+      {/* Hot Reload Status */}
       {config.configVersion && (
         <div 
-          className="absolute top-0 left-0 p-1 z-50 pointer-events-none flex flex-col gap-1"
+          className="absolute z-50 pointer-events-none flex flex-col gap-1"
           style={{ 
-            top: (layout.overscanPadding || 0) + 4, 
-            left: (layout.overscanPadding || 0) + 4 
+            top: `calc(${getSize(layout.overscanPadding || 0)} + 4px)`, 
+            left: `calc(${getSize(layout.overscanPadding || 0)} + 4px)` 
           }}
         >
-           {/* Version Badge */}
            <div className="opacity-20 hover:opacity-100 transition-opacity">
                <span className="text-[10px] bg-black text-white px-1 rounded flex items-center gap-1">
                  <Activity size={8} className="animate-pulse" />
                  {config.configVersion}
                </span>
            </div>
-           
-           {/* Smart Polling Indicator (Visible when Paused) */}
            {pollingStatus === 'paused' && (
              <div className="animate-in slide-in-from-left duration-300">
                <span className="text-[10px] bg-yellow-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1 shadow-md font-bold opacity-80">
                  <PauseCircle size={10} />
-                 数据库轮询: 已暂停 (静态内容)
+                 暂停轮询
                </span>
              </div>
            )}
@@ -590,51 +527,48 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
       {/* --- HEADER --- */}
       {header.show && (
         <header 
-          className="w-full flex justify-between items-center px-4 lg:px-6 shadow-lg z-10 shrink-0"
+          className="w-full flex justify-between items-center shadow-lg z-10 shrink-0"
           style={{ 
             background: theme.primary, 
             color: theme.textOnPrimary,
-            height: isLargeScreen ? `${header.height}px` : 'auto',
-            minHeight: isLargeScreen ? 'auto' : '60px',
-            paddingTop: isLargeScreen ? '0' : '8px',
-            paddingBottom: isLargeScreen ? '0' : '8px',
+            height: headerHeightStyle,
+            paddingLeft: getSize(24),
+            paddingRight: getSize(24)
           }}
         >
-          {/* Left: Logo/Name */}
-          <div className="flex items-center gap-2 lg:gap-4 flex-1">
+          <div className="flex items-center flex-1 overflow-hidden" style={{ gap: getSize(16) }}>
             {header.logoType === 'default' && (
-              <div className="w-8 h-8 lg:w-10 lg:h-10 rounded bg-white bg-opacity-20 flex items-center justify-center text-lg lg:text-xl font-bold shadow-sm shrink-0">
+              <div className="rounded bg-white bg-opacity-20 flex items-center justify-center font-bold shadow-sm shrink-0"
+                   style={{ height: '60%', aspectRatio: '1/1', fontSize: getSize(24) }}>
                 U
               </div>
             )}
             {header.logoType === 'image' && header.logoUrl && (
-              <img src={header.logoUrl} alt="Logo" className="h-8 lg:h-10 w-auto object-contain" />
+              <img src={header.logoUrl} alt="Logo" className="h-[60%] w-auto object-contain" />
             )}
             
-            <h1 className="font-bold leading-tight truncate" style={{ fontSize: isLargeScreen ? `${header.hospitalNameSize}px` : '1.25rem' }}>
+            <h1 className="font-bold leading-tight truncate" style={{ fontSize: getSize(header.hospitalNameSize) }}>
               {header.hospitalName}
             </h1>
           </div>
 
-          {/* Center: Title */}
           {header.showCenterTitle && (
-            <div className={`flex-1 text-center font-medium opacity-90 truncate px-2 ${!isLargeScreen ? 'hidden md:block' : ''}`} style={{ fontSize: isLargeScreen ? `${header.centerTitleSize}px` : '1rem' }}>
+            <div className={`flex-1 text-center font-medium opacity-90 truncate px-2`} style={{ fontSize: getSize(header.centerTitleSize) }}>
               {header.centerTitle}
             </div>
           )}
 
-          {/* Right: Time or Text */}
           <div className="flex-1 flex justify-end">
             {header.rightContentType === 'time' && (
               <div className="text-right">
-                <div className="text-xs opacity-80 mb-0.5">{formatDate(currentTime)}</div>
-                <div className="font-mono font-bold leading-none tracking-widest text-lg lg:text-2xl">
+                <div className="opacity-80 mb-[0.2em]" style={{ fontSize: getSize(12) }}>{formatDate(currentTime)}</div>
+                <div className="font-mono font-bold leading-none tracking-widest" style={{ fontSize: getSize(header.height * 0.4) }}>
                   {formatTime(currentTime, header.timeFormat)}
                 </div>
               </div>
             )}
             {header.rightContentType === 'text' && (
-               <div className="text-right font-bold text-lg lg:text-xl opacity-90">
+               <div className="text-right font-bold opacity-90" style={{ fontSize: getSize(24) }}>
                  {header.rightTextContent}
                </div>
             )}
@@ -645,106 +579,73 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
       {/* --- MAIN CONTENT (Dynamic Grid) --- */}
       <main 
         className={`flex-1 flex overflow-hidden ${isHorizontal ? 'flex-row' : 'flex-col'}`}
-        style={{ padding: `${layout.containerPadding}px`, gap: `${layout.gap}px` }}
+        style={{ 
+            padding: getSize(layout.containerPadding), 
+            gap: getSize(layout.gap) 
+        }}
       >
-        
-        {/* Left Column (or Top Section in Portrait) */}
         {hasLeft && (
           <div 
              className="flex flex-col transition-all duration-300" 
              style={{ 
                width: leftWidth, 
-               gap: `${layout.gap}px`,
-               // If horizontal: Height is 100%, flex is set by logic above
-               // If vertical/mobile: Height is auto, or controlled by splitRatio if we wanted to enforce it
+               gap: getSize(layout.gap),
                height: isHorizontal ? '100%' : 'auto', 
                flex: isHorizontal ? undefined : 1
              }}
           >
-            
-            {/* Top Left */}
             {layout.topLeft?.type !== 'hidden' && (
-              <div 
-                style={{ 
-                  flex: layout.bottomLeft?.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%`,
-                  overflow: 'hidden',
-                  minHeight: 0
-                }}
-              >
+              <div style={{ flex: layout.bottomLeft?.type === 'hidden' ? '1' : `${layout.leftSplitRatio ?? 50} 1 0%`, overflow: 'hidden', minHeight: 0 }}>
                 {renderZoneContent(layout.topLeft)}
               </div>
             )}
-
-            {/* Bottom Left */}
             {layout.bottomLeft?.type !== 'hidden' && (
-              <div 
-                 style={{ 
-                   flex: layout.topLeft?.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%`,
-                   overflow: 'hidden',
-                   minHeight: 0
-                 }}
-              >
+              <div style={{ flex: layout.topLeft?.type === 'hidden' ? '1' : `${100 - (layout.leftSplitRatio ?? 50)} 1 0%`, overflow: 'hidden', minHeight: 0 }}>
                 {renderZoneContent(layout.bottomLeft)}
               </div>
             )}
           </div>
         )}
 
-        {/* Right Column (or Bottom Section in Portrait) */}
         {hasRight && (
           <div 
              className="flex flex-col transition-all duration-300"
              style={{ 
                width: rightWidth, 
-               gap: `${layout.gap}px`,
+               gap: getSize(layout.gap),
                height: isHorizontal ? '100%' : 'auto',
                flex: isHorizontal ? undefined : 1
              }}
           >
-            
-             {/* Top Right */}
              {layout.topRight?.type !== 'hidden' && (
-              <div 
-                style={{ 
-                  flex: layout.bottomRight?.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%`,
-                  overflow: 'hidden',
-                  minHeight: 0
-                }}
-              >
+              <div style={{ flex: layout.bottomRight?.type === 'hidden' ? '1' : `${layout.rightSplitRatio ?? 50} 1 0%`, overflow: 'hidden', minHeight: 0 }}>
                 {renderZoneContent(layout.topRight)}
               </div>
             )}
-
-            {/* Bottom Right */}
             {layout.bottomRight?.type !== 'hidden' && (
-              <div 
-                 style={{ 
-                   flex: layout.topRight?.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%`,
-                   overflow: 'hidden',
-                   minHeight: 0
-                 }}
-              >
+              <div style={{ flex: layout.topRight?.type === 'hidden' ? '1' : `${100 - (layout.rightSplitRatio ?? 50)} 1 0%`, overflow: 'hidden', minHeight: 0 }}>
                 {renderZoneContent(layout.bottomRight)}
               </div>
             )}
           </div>
         )}
-
       </main>
 
       {/* --- FOOTER --- */}
       {layout.footerShow && (
         <footer 
-          className="w-full px-4 text-center font-medium flex items-center justify-center shrink-0 z-10 overflow-hidden relative"
-          style={{ background: theme.secondary, height: `${layout.footerHeight}px`, color: '#fff' }}
+          className="w-full text-center font-medium flex items-center justify-center shrink-0 z-10 overflow-hidden relative"
+          style={{ 
+              background: theme.secondary, 
+              height: isLargeScreen ? `${layout.footerHeight}px` : '6vh', 
+              color: '#fff',
+              fontSize: getSize(20)
+          }}
         >
           {layout.footerScroll ? (
             <div 
               className="whitespace-nowrap inline-block min-w-full"
-              style={{ 
-                animation: `marquee ${layout.footerSpeed}s linear infinite`,
-                willChange: 'transform'
-              }}
+              style={{ animation: `marquee ${layout.footerSpeed}s linear infinite`, willChange: 'transform' }}
               dangerouslySetInnerHTML={{ __html: footerHtml }}
             />
           ) : (
