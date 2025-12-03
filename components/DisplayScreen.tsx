@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
-import { WifiOff, Activity, PauseCircle, RefreshCw } from 'lucide-react';
+import { WifiOff, Activity, PauseCircle } from 'lucide-react';
 import { DEFAULT_CONFIG } from '../constants';
 
 interface DisplayScreenProps {
@@ -16,14 +17,19 @@ const useMediaQuery = (query: string) => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
         return;
     }
-
-    const media = window.matchMedia(query);
-    if (media.matches !== matches) {
-      setMatches(media.matches);
+    
+    try {
+        const media = window.matchMedia(query);
+        if (media.matches !== matches) {
+          setMatches(media.matches);
+        }
+        const listener = () => setMatches(media.matches);
+        media.addEventListener('change', listener);
+        return () => media.removeEventListener('change', listener);
+    } catch (e) {
+        console.warn("MatchMedia failed", e);
+        return;
     }
-    const listener = () => setMatches(media.matches);
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
   }, [matches, query]);
 
   return matches;
@@ -50,7 +56,17 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   const isHorizontal = layout.orientation === 'landscape' && isLargeScreen;
 
   // Track the last called ID and timestamp to handle deduplication and recalls
-  const lastCalledRef = useRef<{id: string, ts: number} | null>(null);
+  // Initialize with CURRENT patient ID to prevent speaking immediately on page load/refresh
+  const lastCalledRef = useRef<{id: string, ts: number} | null>((() => {
+     if (config.currentPatient?.id) {
+         const p = config.currentPatient;
+         const ts = p.callTimestamp 
+            ? (typeof p.callTimestamp === 'number' ? p.callTimestamp : new Date(p.callTimestamp).getTime()) 
+            : 0;
+         return { id: p.id, ts };
+     }
+     return null;
+  })());
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -137,6 +153,8 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
 
     if (isNewCall || isRecall) {
       // Check Broadcast Mode
+      // 'all' = Centralized calling (broadcasts everything)
+      // 'local' = Only broadcast if window matches config
       if (speech.broadcastMode === 'local') {
          // Strict Check: Match Window Number (Preferred)
          const pWinNum = p.windowNumber;
@@ -146,16 +164,16 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
            // If numbers are available, strict match
            if (pWinNum !== cWinNum) {
               lastCalledRef.current = { id: p.id, ts: currentTs };
-              return;
+              return; // Do not speak
            }
          } else if (p.windowName && p.windowName !== config.windowName) {
            // Fallback: If no number, check Window Name
            lastCalledRef.current = { id: p.id, ts: currentTs };
-           return; 
+           return; // Do not speak
          }
       }
 
-      // Update ref
+      // Update ref to prevent repeats
       lastCalledRef.current = { id: p.id, ts: currentTs };
       
       // Prepare text
@@ -192,28 +210,31 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config }) => {
   // --- Unregistered State Overlay ---
   if (system && !system.isRegistered) {
     return (
-      <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white p-8 space-y-8 select-none">
-        <div className="w-24 h-24 rounded-full bg-red-600 flex items-center justify-center animate-pulse">
-           <WifiOff size={48} />
+      <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center text-white p-6 py-12 md:p-8 space-y-8 select-none">
+        <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-red-600 flex items-center justify-center animate-pulse shadow-lg shadow-red-900/50 shrink-0">
+           <WifiOff size={40} className="md:w-12 md:h-12" />
         </div>
-        <div className="text-center space-y-2">
-           <h1 className="text-4xl font-bold">终端未注册 (Unregistered)</h1>
-           <p className="text-xl text-gray-400">此设备尚未绑定任何窗口或预案</p>
+        <div className="text-center space-y-3">
+           <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight">终端未注册 (Unregistered)</h1>
+           <p className="text-lg md:text-xl lg:text-2xl text-gray-400 px-4">此设备尚未绑定任何窗口或预案</p>
         </div>
         
-        <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 w-full max-w-lg">
-           <div className="grid grid-cols-2 gap-4 text-sm font-mono">
-              <div className="text-gray-500">Device IP:</div>
-              <div className="text-right text-blue-400">{system.deviceIp}</div>
-              <div className="text-gray-500">MAC Address:</div>
-              <div className="text-right text-purple-400">{system.deviceMac}</div>
-              <div className="text-gray-500">Device ID:</div>
-              <div className="text-right text-green-400">{system.deviceId}</div>
+        <div className="bg-gray-800 p-6 md:p-8 rounded-2xl border border-gray-700 w-full max-w-xl lg:max-w-2xl shadow-xl">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 text-base md:text-lg font-mono">
+              <div className="flex justify-between md:contents items-center border-b md:border-0 border-gray-700 pb-2 md:pb-0">
+                  <div className="text-gray-500">Device ID:</div>
+                  <div className="text-right text-green-400 font-bold text-xl md:text-2xl break-all">{system.deviceId}</div>
+              </div>
+              
+              <div className="flex justify-between md:contents items-center pt-2 md:pt-0">
+                  <div className="text-gray-500">IP Address:</div>
+                  <div className="text-right text-blue-400 break-all">{system.deviceIp || '---'}</div>
+              </div>
            </div>
         </div>
 
-        <div className="text-sm text-gray-500">
-          请联系管理员在服务端配置此设备 IP 地址
+        <div className="text-base md:text-lg text-gray-500 mt-8 animate-bounce text-center px-4">
+          请联系管理员在后台 "终端窗口管理" 中绑定此 ID
         </div>
       </div>
     );

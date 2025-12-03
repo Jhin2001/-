@@ -78,6 +78,44 @@ const App: React.FC = () => {
   // Navigation State - Default to Dashboard
   const [activeTab, setActiveTab] = useState<'dashboard'|'design'|'devices'|'settings'|'query'|'logs'|'rules'>('dashboard');
 
+  // --- Handshake with UniApp ---
+  useEffect(() => {
+    // Send a message to the parent frame (UniApp WebView) to confirm React is running.
+    // We send this aggressively to ensure it's caught.
+    const sendHandshake = () => {
+        try {
+            const payload = { action: 'PQMS_LOADED' };
+            
+            // 1. Standard PostMessage
+            window.parent.postMessage({ data: payload }, '*');
+
+            // 2. UniApp JS SDK (Preferred)
+            // The SDK is loaded in index.html, creating 'uni' on window
+            // @ts-ignore
+            if (window.uni && window.uni.postMessage) {
+                // @ts-ignore
+                window.uni.postMessage({ data: payload });
+            } else if ((window as any).plus) {
+               // Fallback for some H5+ environments
+               console.log("Sending via H5+");
+            }
+        } catch(e) {
+            console.warn("Handshake failed:", e);
+        }
+    };
+
+    // Burst send for 5 seconds to ensure WebView is ready
+    sendHandshake();
+    let count = 0;
+    const timer = setInterval(() => {
+        sendHandshake();
+        count++;
+        if (count > 10) clearInterval(timer);
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const initTvModeLocalFallback = (
     devId: string, 
     loadedDevices: DeviceBinding[], 
@@ -101,8 +139,11 @@ const App: React.FC = () => {
               deviceMac: device.macAddress,
               isRegistered: true
           };
+          // Force apply the assigned window info over the preset's info
+          // This ensures that even if preset says "Window 2", the binding "Window 1" wins.
           if (device.assignedWindowNumber) newConfig.windowNumber = device.assignedWindowNumber;
           if (device.assignedWindowName) newConfig.windowName = device.assignedWindowName;
+          
           setConfig(newConfig);
       } else {
           setConfig(prev => ({

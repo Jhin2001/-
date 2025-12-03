@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { DeviceBinding, Preset } from '../types';
-import { Monitor, Plus, Edit2, Trash2, Save, X, CloudLightning, CloudOff, Server, ExternalLink, Hash } from 'lucide-react';
+import { Monitor, Plus, Edit2, Trash2, Save, X, CloudLightning, CloudOff, Server, ExternalLink, Hash, Network } from 'lucide-react';
 import api from '../services/api';
 import { useToast } from './ToastProvider';
 import ConfirmModal from './ConfirmModal';
@@ -49,7 +49,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
           id: 'SERVER_MONITOR',
           name: '服务端预览监视器',
           ipAddress: '127.0.0.1',
-          macAddress: '00:00:00:00:00:00',
+          macAddress: '',
           assignedWindowNumber: '1',
           assignedWindowName: '综合窗口',
           linkedPresetId: availablePresets[0]?.id || '',
@@ -89,7 +89,7 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
       assignedWindowNumber: '1',
       assignedWindowName: '综合窗口',
       linkedPresetId: availablePresets[0]?.id || '',
-      status: 'unregistered',
+      status: 'offline', // Change default from 'unregistered' to 'offline'
       lastSeen: new Date().toISOString()
     };
     setEditForm(newDevice);
@@ -110,17 +110,24 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
         return;
     }
 
+    // Clean data (Optional fields default to empty string)
+    const cleanForm = {
+        ...editForm,
+        ipAddress: editForm.ipAddress || '',
+        macAddress: editForm.macAddress || ''
+    };
+
     if (isConnected) {
         try {
             // Fix: Ensure numerical values are converted to strings for backend compatibility
             const payload = {
-                ...editForm,
+                ...cleanForm,
                 // If lastSeen is a number (timestamp), convert to ISO string. If 0, use current time.
-                lastSeen: typeof editForm.lastSeen === 'number' 
-                    ? new Date(editForm.lastSeen || Date.now()).toISOString()
-                    : (editForm.lastSeen || new Date().toISOString()),
+                lastSeen: typeof cleanForm.lastSeen === 'number' 
+                    ? new Date(cleanForm.lastSeen || Date.now()).toISOString()
+                    : (cleanForm.lastSeen || new Date().toISOString()),
                 // Ensure window number is string
-                assignedWindowNumber: String(editForm.assignedWindowNumber || '')
+                assignedWindowNumber: String(cleanForm.assignedWindowNumber || '')
             };
 
             await api.admin.saveDevice(payload as any);
@@ -137,17 +144,17 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
     }
     
     // Local Fallback
-    const exists = devices.find(d => d.id === editForm.id);
+    const exists = devices.find(d => d.id === cleanForm.id);
     let newDevices;
     if (exists && editingId !== '__NEW_DEVICE__') {
-      newDevices = devices.map(d => d.id === editForm.id ? editForm : d);
+      newDevices = devices.map(d => d.id === cleanForm.id ? cleanForm : d);
     } else {
       // Check if ID collision for new device
-      if (devices.find(d => d.id === editForm.id)) {
+      if (devices.find(d => d.id === cleanForm.id)) {
           toast.error("设备 ID 已存在");
           return;
       }
-      newDevices = [...devices, editForm];
+      newDevices = [...devices, cleanForm];
     }
     
     onUpdateDevices(newDevices);
@@ -232,7 +239,11 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">状态</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">设备 ID</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">设备名称</th>
-              <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">IP / MAC</th>
+              <th className="px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                 <div className="flex items-center gap-1">
+                    <Network size={12} /> 网络信息 (IP/MAC)
+                 </div>
+              </th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">绑定窗口</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">应用预案</th>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">操作</th>
@@ -270,9 +281,13 @@ const DeviceManager: React.FC<DeviceManagerProps> = ({ devices, presets, onUpdat
                         {device.id === 'SERVER_MONITOR' && <Server size={14} className="inline mr-1 text-purple-600"/>}
                         {device.name}
                     </td>
-                    <td className="px-6 py-4 text-sm font-mono text-gray-500">
-                      <div>{device.ipAddress || '---'}</div>
-                      <div className="text-xs text-gray-400">{device.macAddress}</div>
+                    <td className="px-6 py-4 text-sm font-mono text-gray-400">
+                      {device.ipAddress ? (
+                          <div>{device.ipAddress}</div>
+                      ) : (
+                          <div className="text-gray-300 italic">未填 IP</div>
+                      )}
+                      {device.macAddress && <div className="text-xs text-gray-300">{device.macAddress}</div>}
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-bold text-gray-800">{device.assignedWindowName}</div>
@@ -384,15 +399,15 @@ const renderEditRow = (
         type="text" 
         value={form.ipAddress}
         onChange={(e) => setForm({...form, ipAddress: e.target.value})}
-        className="w-full border p-1 rounded text-sm font-mono"
-        placeholder="IP Address"
+        className="w-full border p-1 rounded text-xs font-mono"
+        placeholder="IP (选填)"
       />
       <input 
         type="text" 
         value={form.macAddress}
         onChange={(e) => setForm({...form, macAddress: e.target.value})}
-        className="w-full border p-1 rounded text-sm font-mono"
-        placeholder="MAC Address"
+        className="w-full border p-1 rounded text-xs font-mono"
+        placeholder="MAC (选填-用于远程开机)"
       />
     </td>
     <td className="px-6 py-4 space-y-2">

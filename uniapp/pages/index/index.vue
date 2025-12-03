@@ -15,16 +15,6 @@
 						<text class="label">本级终端 ID:</text>
 						<text class="value highlight">{{deviceId}}</text>
 					</view>
-					<!-- 新增：显示原生获取的真实 IP 和 MAC -->
-					<view class="info-row">
-						<text class="label">本机 IP:</text>
-						<text class="value">{{nativeIp}}</text>
-					</view>
-					<view class="info-row">
-						<text class="label">本机 MAC:</text>
-						<text class="value">{{nativeMac}}</text>
-					</view>
-
 					<text class="desc">请在后台“终端管理”中添加此 ID 以绑定窗口。</text>
 				</view>
 				
@@ -51,20 +41,39 @@
 				:src="fullUrl"
 				class="webview"
 				@error="handleWebError"
-				@message="handleWebMessage"
+				@load="handleWebLoad"
+                @message="handleMessage"
 			></web-view>
 			
-			<!-- 网络断开提示层 -->
-			<cover-view v-if="!isOnline" class="offline-mask">
-				<cover-view class="offline-box">
-					<cover-image src="/static/wifi-off.png" class="offline-icon"></cover-image>
-					<cover-view class="offline-text">网络连接已断开</cover-view>
-					<cover-view class="offline-sub">正在尝试重新连接...</cover-view>
+			<!-- 3. 加载中/错误状态覆盖层 (Cover View) -->
+			<!-- 当正在加载或加载失败时显示，背景不透明，防止黑屏 -->
+			<cover-view v-if="isLoadFailed || isLoading" class="status-overlay">
+				
+				<!-- Loading 状态 -->
+				<cover-view v-if="isLoading" class="status-box">
+					<cover-view class="spinner"></cover-view>
+					<cover-view class="status-text">正在连接服务器...</cover-view>
+					<cover-view class="status-sub">{{savedUrl}}</cover-view>
+					<!-- 如果卡在 Loading 太久，提供强制退出按钮 -->
+					<cover-view class="btn-mini" @click="reconfigure">取消并重设</cover-view>
+				</cover-view>
+
+				<!-- Error 状态 -->
+				<cover-view v-if="isLoadFailed" class="status-box error-box">
+					<cover-image src="/static/wifi-off.png" class="status-icon"></cover-image>
+					<cover-view class="status-title">连接失败</cover-view>
+					<cover-view class="status-desc">无法访问地址: {{savedUrl}}</cover-view>
+					<cover-view class="status-desc">请检查地址是否正确或服务是否启动</cover-view>
+					
+					<cover-view class="btn-row">
+						<cover-view class="btn-action btn-retry" @click="retryConnection">重试连接</cover-view>
+						<cover-view class="btn-action btn-reset" @click="reconfigure">重新配置地址</cover-view>
+					</cover-view>
 				</cover-view>
 			</cover-view>
 			
-			<!-- 3. 悬浮设置按钮 (Cover View 用于覆盖 WebView) -->
-			<cover-view class="float-btn" @click="handleSettingsClick">
+			<!-- 4. 悬浮设置按钮 (仅在加载成功后显示，避免遮挡错误页) -->
+			<cover-view v-if="!isLoadFailed && !isLoading" class="float-btn" @click="handleSettingsClick">
 				<cover-view class="float-icon">⚙️</cover-view>
 			</cover-view>
 		</block>
@@ -84,11 +93,17 @@
 				deviceId: '',
 				inputUrl: 'http://',
 				savedUrl: '',
-				webviewVisible: true, // 控制 WebView 显隐用于重载
-				isOnline: true,
-				retryCount: 0,
-				nativeIp: '0.0.0.0',
-				nativeMac: '00:00:00:00:00:00'
+				webviewVisible: true,
+				
+				// 状态控制
+				isLoading: true,     // 是否正在加载
+				isLoadFailed: false, // 是否加载失败
+				loadingTimer: null,  // 超时定时器
+				
+				nativeIp: '0.0.0.0', // 简化版，不再强求获取
+				nativeMac: '00:00:00:00:00:00',
+				
+				hasLoadedOnce: false // 标记是否成功加载过一次
 			}
 		},
 		computed: {
@@ -96,214 +111,136 @@
 				if (!this.savedUrl) return '';
 				const base = this.savedUrl.replace(/\/+$/, '');
 				// 增加 timestamp 防止 WebView 缓存
-				// 同时将 IP 和 MAC 透传给 React 前端，方便其上报心跳
-				return `${base}/?mode=tv&deviceId=${this.deviceId}&ip=${this.nativeIp}&mac=${this.nativeMac}&ts=${Date.now()}`;
+				return `${base}/?mode=tv&deviceId=${this.deviceId}&ts=${Date.now()}`;
 			}
 		},
 		onLoad() {
 			this.initDeviceId();
-			this.getNativeNetworkInfo(); // 获取真实网络信息
 			this.initServerUrl();
-			this.setupCrashProtection();
 		},
 		onShow() {
 			// #ifdef APP-PLUS
-			// 强力保活：应用切回前台时，再次申请唤醒锁
 			plus.device.setWakelock(true);
 			plus.screen.lockOrientation('landscape-primary');
 			// #endif
 		},
+		// 监听物理返回键 (Android)
+		onBackPress(e) {
+			if (this.isConfigured) {
+				// 如果当前在 WebView 页面，拦截返回键，询问是否重置
+				// 避免误触直接退出 App
+				this.handleSettingsClick();
+				return true; // 阻止默认返回行为
+			}
+			return false; // 在配置页允许退出
+		},
 		methods: {
 			initDeviceId() {
 				let id = '';
-				try {
-					id = uni.getStorageSync('pqms_device_id');
-				} catch(e) { console.error(e); }
-
+				try { id = uni.getStorageSync('pqms_device_id'); } catch(e) {}
 				if (!id) {
 					const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
 					id = `TV-${randomStr}`;
-					try {
-						uni.setStorageSync('pqms_device_id', id);
-					} catch(e) { console.error(e); }
+					try { uni.setStorageSync('pqms_device_id', id); } catch(e) {}
 				}
 				this.deviceId = id;
 			},
 			
-			// --- Native.js 获取真实 IP 和 MAC (Android) ---
-			getNativeNetworkInfo() {
-				// #ifdef APP-PLUS
-				if (plus.os.name === 'Android') {
-					try {
-						console.log("Starting Native Network Info Fetch...");
-						
-						// 1. 获取 IPv4
-						let ip = "0.0.0.0";
-						const NetworkInterface = plus.android.importClass("java.net.NetworkInterface");
-						const Inet4Address = plus.android.importClass("java.net.Inet4Address");
-						const Collections = plus.android.importClass("java.util.Collections");
-						
-						const interfaces = NetworkInterface.getNetworkInterfaces();
-						const interfaceList = Collections.list(interfaces);
-						
-						// 遍历接口
-						for (let i = 0; i < interfaceList.size(); i++) {
-							const intf = interfaceList.get(i);
-							const name = intf.getName();
-							// console.log("Checking interface: " + name);
-							
-							// 忽略回环和未启动的接口，通常找 wlan0 (wifi) 或 eth0 (有线)
-							if (!intf.isLoopback() && intf.isUp()) {
-								const addrs = intf.getInetAddresses();
-								while (addrs.hasMoreElements()) {
-									const addr = addrs.nextElement();
-									// 仅获取 IPv4
-									if (plus.android.instanceOf(addr, Inet4Address)) {
-										const sAddr = addr.getHostAddress();
-										// 排除 127.0.0.1 (虽然 isLoopback 已经排除了，双重保险)
-										if (!sAddr.startsWith("127.")) {
-											ip = sAddr;
-											// 如果是有线 eth0，优先级最高，直接覆盖
-											if (name.indexOf("eth") !== -1) {
-												this.nativeIp = ip;
-												// 继续找 MAC
-											} else {
-												// 暂存 wlan0 的 IP，如果后面没有 eth0 就用这个
-												this.nativeIp = ip;
-											}
-										}
-									}
-								}
-							}
-						}
-
-						// 2. 获取 MAC 地址 (绕过 Android 10+ 限制，读取系统文件)
-						// 标准 API 在 Android 10+ 返回 02:00:00:00:00:00
-						let mac = "";
-						const File = plus.android.importClass("java.io.File");
-						const FileReader = plus.android.importClass("java.io.FileReader");
-						const BufferedReader = plus.android.importClass("java.io.BufferedReader");
-
-						const readMacFile = (path) => {
-							try {
-								const file = new File(path);
-								if (file.exists()) {
-									const reader = new FileReader(file);
-									const br = new BufferedReader(reader);
-									const line = br.readLine();
-									br.close();
-									reader.close();
-									return line ? line.trim().toUpperCase() : "";
-								}
-							} catch(e) {
-								console.error("Read file error: " + path, e);
-							}
-							return "";
-						};
-
-						// 优先尝试有线，再尝试 WiFi
-						mac = readMacFile("/sys/class/net/eth0/address");
-						if (!mac || mac === "00:00:00:00:00:00") {
-							mac = readMacFile("/sys/class/net/wlan0/address");
-						}
-						
-						if (mac && mac !== "00:00:00:00:00:00") {
-							this.nativeMac = mac;
-						} else {
-							// Fallback: 尝试使用 WifiManager (针对旧版本 Android)
-							// 这里省略，因为现在大多数电视盒都是 Android 7/8/9+，文件读取通常更有效
-						}
-
-					} catch(e) {
-						console.error("Native Info Error:", e);
-					}
-				}
-				// #endif
-			},
-
 			initServerUrl() {
 				if (DEFAULT_SERVER_URL && DEFAULT_SERVER_URL.length > 0) {
-					console.log("Using hardcoded URL:", DEFAULT_SERVER_URL);
 					this.savedUrl = DEFAULT_SERVER_URL;
-					this.isConfigured = true;
+					this.startLoading();
 					return;
 				}
 
 				let storedUrl = '';
-				try {
-					storedUrl = uni.getStorageSync('pqms_server_url');
-				} catch(e) { console.error(e); }
+				try { storedUrl = uni.getStorageSync('pqms_server_url'); } catch(e) {}
 
 				if (storedUrl) {
-					console.log("Using stored URL:", storedUrl);
 					this.savedUrl = storedUrl;
-					this.isConfigured = true;
+					this.startLoading();
 					return;
 				}
 
 				this.isConfigured = false;
 			},
-			
-			// --- 稳定性核心逻辑 ---
-			setupCrashProtection() {
-				// 1. 网络监听
-				uni.getNetworkType({
-					success: (res) => {
-						this.isOnline = res.networkType !== 'none';
-					}
-				});
-				
-				uni.onNetworkStatusChange((res) => {
-					console.log("Network changed:", res.isConnected);
-					this.isOnline = res.isConnected;
-					
-					if (res.isConnected) {
-						// 网络恢复后，延迟 2秒 刷新 WebView，防止瞬断导致白屏
-						setTimeout(() => {
-							this.reloadWebview();
-						}, 2000);
-					}
-				});
 
-				// 2. 内存泄漏防护 (可选：每 12 小时重载一次)
-				// setInterval(() => { this.reloadWebview(); }, 12 * 60 * 60 * 1000);
+			startLoading() {
+				this.isConfigured = true;
+				this.isLoading = true;
+				this.isLoadFailed = false;
+				this.hasLoadedOnce = false;
+				this.webviewVisible = true;
+				
+				// 设置超时保护：如果 15秒还没加载成功
+				// 采用 "Fail-Open" 策略：假设已经加载成功了，直接隐藏遮罩层
+				// 这样即使 index.css 404 或 @message 丢失，用户也能看到界面，而不是被红色错误页挡住
+				if (this.loadingTimer) clearTimeout(this.loadingTimer);
+				this.loadingTimer = setTimeout(() => {
+					// 只有当还没有成功加载过时，才触发
+					if (this.isLoading && !this.hasLoadedOnce) {
+						console.log("Loading Timeout - Strategy: Fail Open");
+						// 核心修改：超时不报错，而是直接认为成功，隐藏 Loading
+						this.isLoading = false; 
+						this.isLoadFailed = false;
+					}
+				}, 15000);
 			},
 
-			reloadWebview() {
-				console.log("Reloading WebView...");
+			handleWebLoad() {
+				// WebView 加载成功回调
+				console.log("WebView Loaded Successfully (onLoad)");
+				this.isLoading = false;
+				this.isLoadFailed = false;
+				this.hasLoadedOnce = true;
+				if (this.loadingTimer) clearTimeout(this.loadingTimer);
+			},
+
+            // Handle handshake message from React App
+            handleMessage(e) {
+                console.log("Received Message from WebView:", e.detail);
+                // If we receive ANY data from the page, it means it's running!
+                if (e.detail && e.detail.data) {
+                    this.handleWebLoad();
+                }
+            },
+
+			handleWebError(e) {
+				// UniApp 的 WebView @error 非常敏感，任何资源 404 (如 index.css) 都会触发。
+				// 我们不再在此处判定为失败，而是完全依赖 startLoading 中的超时检测。
+				// 超时检测也改为 Fail-Open 策略，所以非致命错误不会再阻断页面显示。
+				console.warn("WebView reported error (ignored, waiting for load or timeout):", e);
+			},
+
+			retryConnection() {
+				// 强制刷新 WebView
 				this.webviewVisible = false;
+				this.isLoading = true;
+				this.isLoadFailed = false;
+				this.hasLoadedOnce = false;
+				
 				this.$nextTick(() => {
 					setTimeout(() => {
 						this.webviewVisible = true;
-					}, 200); // 短暂延迟确保销毁
+						this.startLoading(); // 重启超时计时
+					}, 300);
 				});
 			},
 
-			handleWebError(e) {
-				console.error("WebView Load Error:", e);
-				// 自动重试机制
-				this.retryCount++;
-				const delay = Math.min(this.retryCount * 2000, 10000); // 2s, 4s, 6s... max 10s
-
-				// 显示原生 Toast 提示
-				uni.showToast({
-					title: `连接中断，${delay/1000}秒后重试...`,
-					icon: 'none',
-					duration: delay
-				});
-
-				setTimeout(() => {
-					this.reloadWebview();
-				}, delay);
+			reconfigure() {
+				// 清除配置并返回首页
+				try {
+					uni.removeStorageSync('pqms_server_url');
+				} catch(e) {}
+				
+				this.isConfigured = false;
+				this.isLoading = false;
+				this.isLoadFailed = false;
+				this.inputUrl = this.savedUrl || 'http://';
+				if (this.loadingTimer) clearTimeout(this.loadingTimer);
 			},
 			
-			handleWebMessage(e) {
-				// 接收来自 React 的消息（预留）
-			},
-			
-			// --- 配置逻辑 ---
 			saveConfig() {
-				// FIX: 增加 trim 处理，去除前后空格
 				if (!this.inputUrl) return uni.showToast({ title: '请输入地址', icon: 'none' });
 				
 				let url = this.inputUrl.trim();
@@ -313,33 +250,32 @@
 					url = 'http://' + url;
 				}
 				
+				// 简单的格式校验
+				if (url.length < 10) return uni.showToast({ title: '地址格式不正确', icon: 'none' });
+
 				try {
 					uni.setStorageSync('pqms_server_url', url);
 					this.savedUrl = url;
-					this.isConfigured = true;
-					uni.showToast({ title: '配置已保存', icon: 'success' });
+					this.startLoading();
 				} catch(e) {
 					uni.showToast({ title: '保存失败: 存储受限', icon: 'none' });
 				}
 			},
+
 			handleSettingsClick() {
 				const isHardcoded = DEFAULT_SERVER_URL && DEFAULT_SERVER_URL.length > 0;
-				let content = `当前设备ID: ${this.deviceId}\n本机IP: ${this.nativeIp}\n本机MAC: ${this.nativeMac}\n前端地址: ${this.savedUrl}`;
-				if (isHardcoded) content += `\n\n(注意：当前使用代码硬编码地址)`;
-				else content += `\n\n确定要重置连接地址吗？`;
+				let content = `当前设备ID: ${this.deviceId}\n前端地址: ${this.savedUrl}`;
+				if (isHardcoded) content += `\n(代码硬编码地址)`;
 
 				uni.showModal({
 					title: '系统设置',
 					content: content,
-					confirmText: isHardcoded ? '确定' : '重置配置',
+					confirmText: isHardcoded ? '确定' : '重新配置',
+					cancelText: '取消',
 					showCancel: !isHardcoded,
 					success: (res) => {
 						if (!isHardcoded && res.confirm) {
-							try {
-								uni.removeStorageSync('pqms_server_url');
-							} catch(e) {}
-							this.isConfigured = false;
-							this.inputUrl = this.savedUrl;
+							this.reconfigure();
 						}
 					}
 				});
@@ -357,69 +293,107 @@
 		color: #fff;
 	}
 	
-	/* 新增 Scroll Container 确保小屏可滚动 */
 	.scroll-container {
 		flex: 1;
-		height: 0; /* 配合 flex:1 确保内部滚动生效 */
+		height: 0;
 		width: 100%;
 	}
 
 	.setup-panel {
-		/* 改为 min-height，允许内容撑开 */
 		min-height: 100%;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		/* 减小内边距适配手机 */
 		padding: 20px;
 		box-sizing: border-box;
 	}
 	
-	/* 调整头部间距 */
 	.header { text-align: center; margin-bottom: 20px; }
-	/* 减小字号适配手机 */
 	.logo-text { font-size: 48px; margin-bottom: 10px; display: block; }
 	.title { font-size: 24px; font-weight: bold; margin-bottom: 5px; display: block; }
-	
 	.subtitle { font-size: 16px; color: #888; }
+	
 	.card { background-color: #333; border-radius: 12px; padding: 20px; width: 100%; max-width: 500px; margin-bottom: 20px; box-sizing: border-box; }
 	.info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 	.label { font-size: 16px; color: #aaa; margin-bottom: 8px; display: block; }
 	.value { font-size: 18px; color: #fff; font-family: monospace; }
-	.value.highlight { font-size: 24px; color: #4cd964; font-weight: bold; font-family: monospace; word-break: break-all; }
+	.value.highlight { font-size: 24px; color: #4cd964; font-weight: bold; }
 	.desc { font-size: 12px; color: #666; margin-top: 5px; display: block; white-space: pre-line; line-height: 1.5; }
+	
 	.form-card { background-color: #2a2a2a; border: 1px solid #444; }
 	.input { background-color: #000; color: #fff; border: 1px solid #555; padding: 15px; font-size: 18px; border-radius: 8px; margin-bottom: 10px; }
 	.btn-save { background-color: #007aff; color: white; font-size: 18px; padding: 10px 40px; border-radius: 8px; width: 100%; max-width: 500px; margin-top: 20px; }
 	
-	.float-btn {
-		position: fixed;
-		top: 20px; left: 20px;
-		width: 40px; height: 40px;
-		background-color: rgba(0,0,0,0.3);
-		border-radius: 20px;
-		display: flex; align-items: center; justify-content: center;
-		z-index: 9999;
-		border: 1px solid rgba(255,255,255,0.1);
-	}
-	.float-icon { color: #fff; font-size: 20px; line-height: 40px; text-align: center; width: 40px; }
-
-	/* 离线遮罩层 */
-	.offline-mask {
+	/* WebView & Overlays */
+	.webview { flex: 1; width: 100%; height: 100%; }
+	
+	.status-overlay {
 		position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-		background-color: rgba(0,0,0,0.8);
+		background-color: #1a1a1a; /* 不透明背景，遮住可能黑屏的WebView */
 		display: flex; align-items: center; justify-content: center;
-		z-index: 9000;
+		z-index: 1000;
 	}
-	.offline-box {
-		width: 300px; height: 200px;
+	
+	.status-box {
+		width: 320px;
 		background-color: #333;
 		border-radius: 16px;
+		padding: 30px 20px;
 		display: flex; flex-direction: column;
-		align-items: center; justify-content: center;
+		align-items: center;
 	}
-	.offline-icon { width: 64px; height: 64px; margin-bottom: 20px; opacity: 0.5; }
-	.offline-text { font-size: 20px; color: #fff; font-weight: bold; }
-	.offline-sub { font-size: 14px; color: #aaa; margin-top: 10px; }
+	
+	.error-box { border: 1px solid #500; background-color: #2a1111; }
+	
+	.spinner {
+		width: 40px; height: 40px;
+		border-radius: 50%;
+		border: 4px solid #555;
+		border-top-color: #007aff;
+		/* UniApp cover-view 动画支持有限，静态显示即可，或者使用原生loading组件 */
+		margin-bottom: 20px;
+	}
+	
+	.status-icon { width: 64px; height: 64px; margin-bottom: 15px; }
+	
+	.status-text { font-size: 20px; color: #fff; font-weight: bold; margin-bottom: 10px; }
+	.status-title { font-size: 22px; color: #ff5555; font-weight: bold; margin-bottom: 10px; }
+	
+	.status-sub { font-size: 14px; color: #aaa; text-align: center; word-break: break-all; margin-bottom: 20px;}
+	.status-desc { font-size: 14px; color: #ccc; text-align: center; margin-bottom: 5px; }
+	
+	.btn-row { display: flex; flex-direction: row; gap: 10px; margin-top: 20px; width: 100%; }
+	
+	.btn-action {
+		flex: 1;
+		height: 44px;
+		line-height: 44px;
+		text-align: center;
+		border-radius: 8px;
+		font-size: 14px;
+		color: #fff;
+	}
+	.btn-retry { background-color: #007aff; }
+	.btn-reset { background-color: #555; }
+	
+	.btn-mini {
+		margin-top: 15px;
+		padding: 5px 15px;
+		border-radius: 4px;
+		border: 1px solid #555;
+		color: #888;
+		font-size: 12px;
+	}
+
+	.float-btn {
+		position: fixed; top: 20px; left: 20px;
+		width: 40px; height: 40px;
+		background-color: rgba(0,0,0,0.5);
+		border-radius: 20px;
+		display: flex; align-items: center; justify-content: center;
+		z-index: 2000;
+		border: 1px solid rgba(255,255,255,0.2);
+	}
+	.float-icon { color: #fff; font-size: 20px; line-height: 40px; text-align: center; width: 40px; }
 </style>

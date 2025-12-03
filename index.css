@@ -1,0 +1,4 @@
+/* This file exists to prevent 404 errors in WebView environments that expect an index.css */
+body {
+  /* No styles needed, Tailwind is CDN based */
+}

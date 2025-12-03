@@ -182,6 +182,25 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   }, [showLoadModal, isConnected]);
 
   const handleLoadPreset = async (id: string) => {
+    // SPECIAL CASE: Loading System Default
+    if (id === 'default') {
+        // Create a deep copy of default config to prevent reference issues
+        const defaultConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+        defaultConfig.configVersion = `v${Date.now()}`;
+        // Ensure registered flag is true so preview works immediately
+        if (defaultConfig.system) defaultConfig.system.isRegistered = true;
+
+        updateConfig(defaultConfig);
+        
+        // Reset preset tracking since this is a fresh start based on defaults
+        setCurrentPresetId(null); 
+        setCurrentPresetName('默认配置 (未保存)');
+        
+        setShowLoadModal(false);
+        toast.success('已加载系统默认配置');
+        return;
+    }
+
     if (isConnected) {
         try {
             // FIX: api.admin.getPreset defined to return QueueConfig, but it likely returns the Preset wrapper
