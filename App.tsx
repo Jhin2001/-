@@ -227,7 +227,8 @@ const App: React.FC = () => {
             // Even when polling queue data, we must occasionally check if the layout config has changed.
             // We check every 10 seconds.
             const now = Date.now();
-            if (deviceId && deviceId !== 'Unknown' && now - lastConfigCheckRef.current > 10000) {
+            // CHANGE: Added isTvMode check. Admin console should NOT hot reload config/layout.
+            if (isTvMode && deviceId && deviceId !== 'Unknown' && now - lastConfigCheckRef.current > 10000) {
                 try {
                     const remoteConfig = await api.device.getConfig(deviceId);
                     // Compare version or registration status

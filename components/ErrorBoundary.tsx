@@ -1,4 +1,4 @@
-import React, { ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -11,15 +11,15 @@ interface State {
   errorInfo: ErrorInfo | null;
 }
 
-class ErrorBoundary extends React.Component<Props, State> {
+class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
     errorInfo: null,
   };
 
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, errorInfo: null };
+  public static getDerivedStateFromError(error: Error): Partial<State> {
+    return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -43,7 +43,7 @@ class ErrorBoundary extends React.Component<Props, State> {
             </div>
             
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 overflow-auto max-h-64 mb-6 text-sm font-mono text-gray-700">
-                <p className="font-bold text-red-600 mb-2">{this.state.error?.message}</p>
+                <p className="font-bold text-red-600">{this.state.error?.message}</p>
                 <pre className="whitespace-pre-wrap text-xs text-gray-500">
                     {this.state.errorInfo?.componentStack}
                 </pre>

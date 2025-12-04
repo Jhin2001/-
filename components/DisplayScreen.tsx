@@ -266,8 +266,6 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
 
         return (
           <div className={wrapperClass} style={windowStyle}>
-            {/* Show deco bubble only if no custom background is set (to keep clean look on custom) */}
-            {!customBg && <div className="absolute top-0 right-0 w-[40%] h-[40%] bg-white opacity-5 rounded-full transform translate-x-1/3 -translate-y-1/3 pointer-events-none"></div>}
             
             <div className="flex-1 flex flex-col items-center justify-center p-[2vmin]">
                {(zoneConfig.showWindowNumber !== false) && (

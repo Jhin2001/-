@@ -23,7 +23,10 @@
 					"<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
 					"<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
 					"<uses-permission android:name=\"android.permission.RECEIVE_BOOT_COMPLETED\"/>",
-					"<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>"
+					"<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
+					"<uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\"/>",
+					"<uses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\"/>",
+					"<uses-permission android:name=\"android.permission.DISABLE_KEYGUARD\"/>"
 				],
 				"orientation": "landscape"
 			},
@@ -33,7 +36,23 @@
 		"orientation": [
 			"landscape-primary",
 			"landscape-secondary"
-		]
+		],
+		"nativePlugins": {
+			"lich-PowerOnAutoStart": {
+				"__plugin_info__": {
+					"name": "开机自启 解锁唤醒屏幕",
+					"description": "开机自启动插件 包含权限申请 解锁唤醒屏幕",
+					"platforms": "Android",
+					"url": "https://ext.dcloud.net.cn/plugin?id=6043",
+					"android_package_name": "com.screen.app",
+					"ios_bundle_id": "",
+					"isCloud": true,
+					"bought": 1,
+					"pid": "6043",
+					"parameters": {}
+				}
+			}
+		}
 	},
 	"quickapp": {},
 	"mp-weixin": {
