@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import DisplayScreen from './components/DisplayScreen';
 import LoginPage from './components/LoginPage';
@@ -58,8 +57,18 @@ const App: React.FC = () => {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard'|'design'|'devices'|'settings'|'query'|'logs'|'rules'>('dashboard');
 
-  // Throttle for config version checking inside the main loop
+  // PERFORMANCE: Use Refs to access latest state inside intervals without re-triggering effects
+  const configRef = useRef(config);
+  const isConnectedRef = useRef(isConnected);
+  const dataVersionRef = useRef(dataVersion);
   const lastConfigCheckRef = useRef<number>(0);
+
+  // Sync refs with state
+  useEffect(() => {
+    configRef.current = config;
+    isConnectedRef.current = isConnected;
+    dataVersionRef.current = dataVersion;
+  }, [config, isConnected, dataVersion]);
 
   useEffect(() => {
     const sendHandshake = () => {
@@ -82,6 +91,51 @@ const App: React.FC = () => {
     }, 500);
     return () => clearInterval(timer);
   }, []);
+
+  // Sync Orientation with UniApp Host (Robust Retry Logic)
+  useEffect(() => {
+    if (!isTvMode) return;
+    
+    const orientation = config.layout?.orientation || 'landscape';
+    const targetOrientation = orientation === 'portrait' ? 'portrait-primary' : 'landscape-primary';
+
+    let retryCount = 0;
+    const maxRetries = 20; // Try for 10 seconds (20 * 500ms)
+
+    const sendOrientationCommand = () => {
+        try {
+            // @ts-ignore
+            if (window.uni && window.uni.postMessage) {
+                console.log(`[App] Sending orientation command: ${targetOrientation}`);
+                // @ts-ignore
+                window.uni.postMessage({
+                    data: {
+                        action: 'SET_ORIENTATION',
+                        orientation: targetOrientation
+                    }
+                });
+                return true;
+            }
+        } catch (e) {
+            console.error("[App] Failed to post orientation to UniApp", e);
+        }
+        return false;
+    };
+
+    // Attempt 1
+    if (!sendOrientationCommand()) {
+        // Retry loop
+        const interval = setInterval(() => {
+            retryCount++;
+            if (sendOrientationCommand() || retryCount >= maxRetries) {
+                clearInterval(interval);
+                if (retryCount >= maxRetries) console.warn("[App] Gave up sending orientation (UniApp bridge not found)");
+            }
+        }, 500);
+        return () => clearInterval(interval);
+    }
+
+  }, [isTvMode, config.layout?.orientation]);
 
   useEffect(() => {
       const deviceId = config.system?.deviceId;
@@ -179,28 +233,32 @@ const App: React.FC = () => {
     }
   }, [appMode]);
 
+  // Optimized Polling Logic
   useEffect(() => {
     const shouldPoll = isTvMode || (appMode === 'admin' && isLoggedIn);
     if (!shouldPoll) return;
 
-    const intervalSeconds = Math.max(config.dataSource?.pollingInterval || 5, 1);
     const pollData = async () => {
       try {
-        if (!isConnected) {
+        // Read from refs to avoid effect re-execution
+        const currentConfig = configRef.current;
+        const currentIsConnected = isConnectedRef.current;
+
+        if (!currentIsConnected) {
              try { await api.system.health(); setIsConnected(true); } catch(e) { setIsConnected(false); return; }
         }
         
-        const isStatic = config.layout ? isConfigStatic(config.layout) : false;
-        const deviceId = config.system?.deviceId;
-        const isUnregistered = !config.system?.isRegistered;
+        const isStatic = currentConfig.layout ? isConfigStatic(currentConfig.layout) : false;
+        const deviceId = currentConfig.system?.deviceId;
+        const isUnregistered = !currentConfig.system?.isRegistered;
 
-        // Condition A: Low-Frequency Polling (Config Only)
+        // Condition A: Low-Frequency Polling (Config Only) for static screens
         if ((isStatic || isUnregistered) && isTvMode && deviceId && deviceId !== 'Unknown') {
             try {
                 const remoteConfig = await api.device.getConfig(deviceId);
-                const regChanged = remoteConfig.system?.isRegistered !== config.system?.isRegistered;
+                const regChanged = remoteConfig.system?.isRegistered !== currentConfig.system?.isRegistered;
                 const remoteLayoutStr = JSON.stringify(remoteConfig.layout || {});
-                const localLayoutStr = JSON.stringify(config.layout || {});
+                const localLayoutStr = JSON.stringify(currentConfig.layout || {});
 
                 if (regChanged || !isConfigStatic(remoteConfig.layout) || remoteLayoutStr !== localLayoutStr) {
                      setConfig(prev => ({ ...prev, ...remoteConfig, system: { ...prev.system, ...(remoteConfig.system || {}) } }));
@@ -209,11 +267,11 @@ const App: React.FC = () => {
         } 
         // Condition B: High-Frequency Polling (Data Snapshot + Throttled Config Check)
         else {
-            const windowFilter = config.speech?.broadcastMode === 'local' ? config.windowNumber : undefined;
-            const snapshot = await api.queue.getSnapshot(windowFilter, config.system?.deviceId);
+            const windowFilter = currentConfig.speech?.broadcastMode === 'local' ? currentConfig.windowNumber : undefined;
+            const snapshot = await api.queue.getSnapshot(windowFilter, currentConfig.system?.deviceId);
             setIsConnected(true); 
 
-            if (snapshot.version !== dataVersion) {
+            if (snapshot.version !== dataVersionRef.current) {
                 setConfig(prev => ({
                    ...prev,
                    currentPatient: snapshot.currentPatient || { id: '', name: '', number: '' } as Patient,
@@ -223,16 +281,13 @@ const App: React.FC = () => {
                 setDataVersion(snapshot.version);
             }
 
-            // HOT RELOAD CHECK:
-            // Even when polling queue data, we must occasionally check if the layout config has changed.
-            // We check every 10 seconds.
+            // HOT RELOAD CHECK (Every 10s)
             const now = Date.now();
-            // CHANGE: Added isTvMode check. Admin console should NOT hot reload config/layout.
             if (isTvMode && deviceId && deviceId !== 'Unknown' && now - lastConfigCheckRef.current > 10000) {
                 try {
                     const remoteConfig = await api.device.getConfig(deviceId);
                     // Compare version or registration status
-                    if (remoteConfig.configVersion !== config.configVersion || remoteConfig.system?.isRegistered !== config.system?.isRegistered) {
+                    if (remoteConfig.configVersion !== currentConfig.configVersion || remoteConfig.system?.isRegistered !== currentConfig.system?.isRegistered) {
                         console.log("Hot Reload: Config version changed, updating layout...");
                         setConfig(prev => ({
                             ...prev, 
@@ -254,11 +309,10 @@ const App: React.FC = () => {
     };
 
     pollData();
-    const isStaticSafe = config.layout ? isConfigStatic(config.layout) : false;
-    const effectiveInterval = isStaticSafe ? 10 : intervalSeconds;
-    const timer = setInterval(pollData, effectiveInterval * 1000);
+    // Default 5s interval for dynamic content
+    const timer = setInterval(pollData, 5000);
     return () => clearInterval(timer);
-  }, [appMode, isLoggedIn, isTvMode, config.dataSource?.pollingInterval, config.layout, config.windowNumber, config.speech?.broadcastMode, dataVersion, isConnected, config.system?.deviceId, config.system?.isRegistered, config.configVersion]);
+  }, [appMode, isLoggedIn, isTvMode]); // REMOVED config dependency to prevent interval flickering
 
   useEffect(() => {
       if (isConnected) {

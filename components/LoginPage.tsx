@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { GlobalSystemSettings } from '../types';
-import { LogIn, User, Lock, Activity } from 'lucide-react';
+import { LogIn, User, Lock, Activity, Info } from 'lucide-react';
 import api from '../services/api';
 
 interface LoginPageProps {
@@ -30,11 +30,12 @@ const LoginPage: React.FC<LoginPageProps> = ({ settings, onLogin }) => {
         console.warn("API Login failed, attempting local fallback:", err);
         
         // Wait a brief moment to prevent brute-force timing attacks (optional, mostly for UX here)
-        // Check against the settings prop (which defaults to '123456' if not synced)
-        if (username === 'admin' && password === settings.adminPassword) {
+        // Check against the settings prop OR the hardcoded default '123456'
+        // This ensures that even if local settings are messed up, the user can still enter with the default.
+        if (username === 'admin' && (password === settings.adminPassword || password === '123456')) {
             onLogin(true);
         } else {
-            setError('用户名或密码错误');
+            setError('用户名或密码错误 (默认: 123456)');
             setIsLoading(false);
         }
     }
@@ -85,7 +86,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ settings, onLogin }) => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-gray-900/50 border border-gray-600 text-white placeholder-gray-400 rounded-xl py-3 pl-11 pr-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                    placeholder="登录密码"
+                    placeholder="登录密码 (默认: 123456)"
                    />
                 </div>
               </div>
@@ -111,6 +112,11 @@ const LoginPage: React.FC<LoginPageProps> = ({ settings, onLogin }) => {
                  )}
               </button>
            </form>
+           
+           <div className="mt-4 flex items-center justify-center gap-1.5 text-[10px] text-gray-400 bg-gray-800/50 p-2 rounded-lg border border-gray-700/50">
+               <Info size={12} className="text-blue-400"/>
+               <span>离线/未配置 API 时，请使用默认密码: <span className="text-white font-mono font-bold">123456</span></span>
+           </div>
         </div>
         
         <p className="text-center text-gray-400 text-xs mt-6">

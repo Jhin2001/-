@@ -1,3 +1,4 @@
+
 {
 	"name": "药房排队大屏端",
 	"appid": "__UNI__B93556A",
@@ -28,14 +29,16 @@
 					"<uses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\"/>",
 					"<uses-permission android:name=\"android.permission.DISABLE_KEYGUARD\"/>"
 				],
-				"orientation": "landscape"
+				"orientation": "auto"
 			},
 			"ios": {},
 			"sdkConfigs": {}
 		},
 		"orientation": [
 			"landscape-primary",
-			"landscape-secondary"
+			"landscape-secondary",
+			"portrait-primary",
+			"portrait-secondary"
 		],
 		"nativePlugins": {
 			"lich-PowerOnAutoStart": {

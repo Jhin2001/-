@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useDeferredValue } from 'react';
 import { QueueConfig, PRESET_THEMES, ContentType, QueueNumberStyle, PassedDisplayMode, ZoneConfig } from '../types';
 import api from '../services/api';
 import DisplayScreen from './DisplayScreen';
@@ -49,6 +48,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
   const [selectedZone, setSelectedZone] = useState<keyof QueueConfig['layout']>('topLeft');
   const toast = useToast();
   
+  // Performance Optimization: Defer config updates to the preview component
+  // This ensures input fields remain responsive even if the preview is heavy
+  const deferredConfig = useDeferredValue(config);
+
   // State to track current editing context
   const [currentPresetId, setCurrentPresetId] = useState<string | null>(null);
   const [currentPresetName, setCurrentPresetName] = useState<string>('');
@@ -1368,7 +1371,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onUpdateConfig, isCon
                         pointerEvents: 'none' // Disable interaction in preview to prevent scrolling issues
                      }}
                   >
-                     <DisplayScreen config={config} isPreview={true} />
+                     {/* Pass deferredConfig to preview so heavy renders don't block input */}
+                     <DisplayScreen config={deferredConfig} isPreview={true} />
                   </div>
               </div>
           </div>

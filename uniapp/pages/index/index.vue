@@ -89,7 +89,8 @@
 				isLoading: true,
 				isLoadFailed: false,
 				loadingTimer: null,
-				hasLoadedOnce: false
+				hasLoadedOnce: false,
+                currentOrientation: 'landscape-primary'
 			}
 		},
 		computed: {
@@ -102,11 +103,17 @@
 		onLoad() {
 			this.initDeviceId();
 			this.initServerUrl();
+            // 初始化时读取存储的方向
+            try {
+                const stored = uni.getStorageSync('pqms_orientation');
+                if (stored) this.currentOrientation = stored;
+            } catch(e) {}
 		},
 		onShow() {
 			// #ifdef APP-PLUS
 			plus.device.setWakelock(true);
-			plus.screen.lockOrientation('landscape-primary');
+            // 恢复屏幕方向
+			plus.screen.lockOrientation(this.currentOrientation);
 			// #endif
 		},
 		onBackPress(e) {
@@ -173,8 +180,29 @@
 			},
 
             handleMessage(e) {
-                if (e.detail && e.detail.data) {
-                    this.handleWebLoad();
+                // uni.postMessage sends data as an array of messages
+                const messages = e.detail && e.detail.data;
+                if (Array.isArray(messages)) {
+                    messages.forEach(msg => {
+                        // Handle Loading Complete
+                        if (msg.action === 'PQMS_LOADED') {
+                            this.handleWebLoad();
+                        }
+                        // Handle Orientation Change
+                        if (msg.action === 'SET_ORIENTATION' && msg.orientation) {
+                            console.log("Received Orientation Request:", msg.orientation);
+                            this.currentOrientation = msg.orientation;
+                            
+                            // 保存方向设置到本地，确保下次启动时生效
+                            try {
+                                uni.setStorageSync('pqms_orientation', msg.orientation);
+                            } catch(e) {}
+
+                            // #ifdef APP-PLUS
+                            plus.screen.lockOrientation(msg.orientation);
+                            // #endif
+                        }
+                    });
                 }
             },
 

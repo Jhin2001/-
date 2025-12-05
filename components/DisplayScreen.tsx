@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient } from '../types';
+import { QueueConfig, ZoneConfig, ContentType, QueueNumberStyle, Patient, HeaderConfig } from '../types';
 import { WifiOff, Activity, PauseCircle } from 'lucide-react';
 import { DEFAULT_CONFIG } from '../constants';
 
@@ -8,6 +7,41 @@ interface DisplayScreenProps {
   config: QueueConfig;
   isPreview?: boolean;
 }
+
+// --- ISOLATED CLOCK COMPONENT ---
+// Performance Fix: Only this component re-renders every second, not the entire screen.
+const Clock: React.FC<{ header: HeaderConfig; isLargeScreen: boolean; getSize: (px: number) => string }> = React.memo(({ header, isLargeScreen, getSize }) => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDate = (date: Date) => {
+    const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
+    return date.toLocaleDateString('zh-CN', options);
+  };
+
+  const formatTime = (date: Date, format: string) => {
+    if (format === 'HH:mm') return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
+  };
+
+  if (header.rightContentType !== 'time') return null;
+
+  return (
+    <div className="text-right">
+      <div className="opacity-80 mb-[0.2em]" style={{ fontSize: getSize(12) }}>{formatDate(currentTime)}</div>
+      <div className="font-mono font-bold leading-none tracking-widest" style={{ fontSize: getSize(header.height * 0.4) }}>
+        {formatTime(currentTime, header.timeFormat)}
+      </div>
+    </div>
+  );
+});
+
 
 // Hook for responsive checks
 const useMediaQuery = (query: string) => {
@@ -34,7 +68,7 @@ const useMediaQuery = (query: string) => {
 };
 
 const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false }) => {
-  const [currentTime, setCurrentTime] = useState(new Date());
+  // Performance: Removed top-level currentTime state to prevent 1Hz full re-renders
   
   const theme = config.theme || DEFAULT_CONFIG.theme;
   const layout = config.layout || DEFAULT_CONFIG.layout;
@@ -53,8 +87,6 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
   const isHorizontal = layout.orientation === 'landscape';
 
   // --- RESPONSIVE HELPER ---
-  // Converts design pixels (based on ~1080p height) to VH units on small screens
-  // 1080px = 100vh => 10px approx 1vh. We use a slightly tighter ratio (div by 12) for better fit.
   const getSize = (px: number) => {
       if (isLargeScreen) return `${px}px`;
       return `${(px / 10.8).toFixed(2)}vh`;
@@ -70,13 +102,6 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
      }
      return null;
   })());
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const isStaticOnly = useMemo(() => {
     const zones = [layout.topLeft, layout.topRight, layout.bottomLeft, layout.bottomRight];
@@ -206,16 +231,6 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
       </div>
     );
   }
-
-  const formatDate = (date: Date) => {
-    const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
-    return date.toLocaleDateString('zh-CN', options);
-  };
-
-  const formatTime = (date: Date, format: string) => {
-    if (format === 'HH:mm') return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-    return date.toLocaleTimeString('zh-CN', { hour12: false });
-  };
 
   const renderQueueNumber = (number: string, style: QueueNumberStyle, fontSize: string, isCurrent?: boolean) => {
     if (!config.showQueueNumber) return null;
@@ -557,15 +572,10 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
           )}
 
           <div className="flex-1 flex justify-end">
-            {header.rightContentType === 'time' && (
-              <div className="text-right">
-                <div className="opacity-80 mb-[0.2em]" style={{ fontSize: getSize(12) }}>{formatDate(currentTime)}</div>
-                <div className="font-mono font-bold leading-none tracking-widest" style={{ fontSize: getSize(header.height * 0.4) }}>
-                  {formatTime(currentTime, header.timeFormat)}
-                </div>
-              </div>
-            )}
-            {header.rightContentType === 'text' && (
+             {/* PERFORMANCE FIX: Clock Logic extracted */}
+             <Clock header={header} isLargeScreen={isLargeScreen} getSize={getSize} />
+             
+             {header.rightContentType === 'text' && (
                <div className="text-right font-bold opacity-90" style={{ fontSize: getSize(24) }}>
                  {header.rightTextContent}
                </div>
@@ -655,4 +665,4 @@ const DisplayScreen: React.FC<DisplayScreenProps> = ({ config, isPreview = false
   );
 };
 
-export default DisplayScreen;
+export default React.memo(DisplayScreen);

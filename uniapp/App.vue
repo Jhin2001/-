@@ -1,11 +1,22 @@
+
 <script>
 	export default {
 		onLaunch: function() {
 			console.log('App Launch');
 			
 			// #ifdef APP-PLUS
-			// 1. 锁定屏幕方向为横屏
-			plus.screen.lockOrientation('landscape-primary');
+			// 1. 设置屏幕方向 (读取本地存储，默认为横屏)
+			try {
+				const lastOrientation = uni.getStorageSync('pqms_orientation');
+                if (lastOrientation) {
+                    plus.screen.lockOrientation(lastOrientation);
+                } else {
+                    // 默认为横屏
+                    plus.screen.lockOrientation('landscape-primary');
+                }
+			} catch(e) {
+				plus.screen.lockOrientation('landscape-primary');
+			}
 			
 			// 2. 保持屏幕常亮 (防止 Android TV 休眠)
 			plus.device.setWakelock(true);
