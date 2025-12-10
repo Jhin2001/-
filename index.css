@@ -1,4 +1,10 @@
-/* This file exists to prevent 404 errors in WebView environments that expect an index.css */
+/* Offline Support: If running 'npm run build', these directives ensure CSS is generated locally */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
-  /* No styles needed, Tailwind is CDN based */
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

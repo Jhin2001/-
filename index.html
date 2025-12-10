@@ -6,35 +6,48 @@
     <title>Pharmacy Queue System</title>
     <!-- Inline Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏥</text></svg>" />
-    <!-- Physical Favicon for tools/browsers that request it directly -->
     <link rel="alternate icon" href="/favicon.ico" />
     
-    <!-- UniApp WebView Bridge SDK (Essential for postMessage communication) -->
-    <script type="text/javascript" src="https://js.cdn.aliyun.dcloud.net.cn/dev/uni-app/uni.webview.1.5.2.js"></script>
+    <!-- 
+      OFFLINE RESOURCES (离线资源):
+      请确保项目根目录下有 'lib' 文件夹，并包含以下文件。
+      下载地址请参考 OFFLINE_RESOURCES.md
+    -->
     
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 1. UniApp WebView SDK (Local) -->
+    <script type="text/javascript" src="./lib/uni.webview.js"></script>
+    
+    <!-- 2. Configure Tailwind CSS BEFORE loading the script -->
+    <script>
+      window.tailwind = {
+        config: {
+          theme: {
+            extend: {
+              colors: {
+                primary: '#7c3aed',
+                secondary: '#db2777',
+              }
+            },
+          },
+        }
+      };
+    </script>
+
+    <!-- 3. Tailwind CSS Runtime (Local) -->
+    <script src="./lib/tailwindcss.js"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      /* System Font Stack for Offline Support */
       body {
-        font-family: 'Inter', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
         background-color: #f3f4f6;
-        /* Prevent highlight color on mobile/touch devices */
         -webkit-tap-highlight-color: transparent;
       }
-      /* Custom Scrollbar for the config panel */
-      ::-webkit-scrollbar {
-        width: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #ccc; 
-        border-radius: 3px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #aaa; 
-      }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #aaa; }
       
       @keyframes marquee {
         0% { transform: translateX(100%); }
@@ -42,23 +55,11 @@
       }
     </style>
     <script>
-      // Global Error Handler for Preview Environment
       window.onerror = function(message, source, lineno, colno, error) {
+        // Ignore known benign errors
+        if (source && (source.includes('tailwindcss.js') || source.includes('uni.webview.js'))) return;
+
         console.error("Global Error Caught:", message, error);
-        var root = document.getElementById('root');
-        // Only show if root is empty (app failed to mount)
-        if (root && (!root.hasChildNodes() || root.innerHTML === '')) {
-            var errorDiv = document.createElement('div');
-            errorDiv.style.padding = '20px';
-            errorDiv.style.color = 'red';
-            errorDiv.style.backgroundColor = '#ffe6e6';
-            errorDiv.style.border = '1px solid red';
-            errorDiv.style.margin = '20px';
-            errorDiv.style.borderRadius = '5px';
-            errorDiv.style.fontFamily = 'monospace';
-            errorDiv.innerHTML = '<strong>Application Error:</strong><br/>' + message;
-            document.body.appendChild(errorDiv);
-        }
       };
     </script>
   <script type="importmap">
@@ -75,7 +76,6 @@
 </head>
   <body>
     <div id="root"></div>
-    <!-- Explicitly load the React Entry Point -->
     <script type="module" src="./index.tsx"></script>
   </body>
 </html>

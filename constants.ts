@@ -1,10 +1,14 @@
 
 import { QueueConfig, PRESET_THEMES, GlobalSystemSettings, DeviceBinding } from './types';
 
+// Encoded SVG Background (Dark Blue/Gray Gradient) - Works offline without external requests
+const OFFLINE_BG_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25' viewBox='0 0 1600 800'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%230f172a'/%3E%3Cstop offset='100%25' stop-color='%231e1b4b'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100%25' height='100%25' fill='url(%23g)'/%3E%3C/svg%3E";
+
 export const DEFAULT_GLOBAL_SETTINGS: GlobalSystemSettings = {
   loginTitle: '药房排队叫号管理系统',
   loginSubtitle: 'Distributed Queue Management System',
-  loginBackgroundImage: 'https://images.unsplash.com/photo-1516549655169-df83a0929519?q=80&w=2070&auto=format&fit=crop',
+  // 使用内嵌 SVG 作为默认背景，避免 404 错误
+  loginBackgroundImage: OFFLINE_BG_IMAGE, 
   adminPassword: '123456',
   apiBaseUrl: 'http://localhost:8081/api/v1',
   apiPort: 8081,
